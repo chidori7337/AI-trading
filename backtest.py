@@ -227,7 +227,7 @@ if result is None:
 
 # La siguiente operación solo puede empezar
 # después de cerrar esta operación
-next_available_index = j + 1
+
 
 trades.append({
         "datetime": current["datetime"],
