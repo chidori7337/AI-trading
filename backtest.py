@@ -153,11 +153,6 @@ while i < len(df) - 1:
     if current["RSI"] > 52:
         long_score += 1
 
-    if current["MACD"] > current["MACD_SIGNAL"]
-        long_score += 1
-
-    if current["MACD_HIST"] > df.iloc[i - 1]["MACD_HIST"]
-        long_score += 1
 
     if (
         current["high"] > df.iloc[i - 1]["high"]
@@ -184,11 +179,7 @@ while i < len(df) - 1:
     if current["RSI"] < 48:
         short_score += 1
 
-    if current["MACD"] < current["MACD_SIGNAL"]
-        short_score += 1
 
-    if current["MACD_HIST"] < df.iloc[i - 1]["MACD_HIST"]
-        short_score += 1
 
     if (
         current["high"] < df.iloc[i - 1]["high"]
