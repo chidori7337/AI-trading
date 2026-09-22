@@ -33,6 +33,11 @@ for column in ["open", "high", "low", "close"]:
 
 df = df.sort_values("datetime").reset_index(drop=True)
 
+print("VELAS OBTENIDAS:", len(df))
+print("DESDE:", df["datetime"].iloc[0])
+print("HASTA:", df["datetime"].iloc[-1])
+
+
 # =========================
 # INDICADORES
 # =========================
@@ -42,6 +47,7 @@ df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
 df["EMA200"] = df["close"].ewm(span=200, adjust=False).mean()
 
 # RSI
+
 delta = df["close"].diff()
 
 gain = delta.clip(lower=0)
@@ -54,16 +60,26 @@ rs = average_gain / average_loss
 
 df["RSI"] = 100 - (100 / (1 + rs))
 
+
 # MACD
+
 ema12 = df["close"].ewm(span=12, adjust=False).mean()
 ema26 = df["close"].ewm(span=26, adjust=False).mean()
 
 df["MACD"] = ema12 - ema26
-df["MACD_SIGNAL"] = df["MACD"].ewm(span=9, adjust=False).mean()
 
-df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
+df["MACD_SIGNAL"] = df["MACD"].ewm(
+    span=9,
+    adjust=False
+).mean()
+
+df["MACD_HIST"] = (
+    df["MACD"] - df["MACD_SIGNAL"]
+)
+
 
 # ATR
+
 previous_close = df["close"].shift(1)
 
 tr1 = df["high"] - df["low"]
@@ -77,31 +93,32 @@ true_range = pd.concat(
 
 df["ATR"] = true_range.rolling(14).mean()
 
-print("\nINDICADORES CALCULADOS CORRECTAMENTE")
+print("INDICADORES CALCULADOS CORRECTAMENTE")
 
-print("VELAS OBTENIDAS:", len(df))
-print("DESDE:", df["datetime"].iloc[0])
-print("HASTA:", df["datetime"].iloc[-1])
 
 # =========================
 # BACKTEST
 # =========================
 
 trades = []
-next_available_index = 200
 
-for i in range(next_available_index, len(df) - 1):
+i = 200
+
+while i < len(df) - 1:
+
     current = df.iloc[i]
 
     price = current["close"]
     atr = current["ATR"]
 
     if pd.isna(atr):
+        i += 1
         continue
 
-    # -------------------------
-    # PUNTUACIÓN LONG
-    # -------------------------
+
+    # =========================
+    # LONG SCORE
+    # =========================
 
     long_score = 0
 
@@ -123,12 +140,17 @@ for i in range(next_available_index, len(df) - 1):
     if current["MACD_HIST"] > df.iloc[i - 1]["MACD_HIST"]:
         long_score += 1
 
-    if current["high"] > df.iloc[i - 1]["high"] and current["low"] > df.iloc[i - 1]["low"]:
+    if (
+        current["high"] > df.iloc[i - 1]["high"]
+        and
+        current["low"] > df.iloc[i - 1]["low"]
+    ):
         long_score += 1
 
-    # -------------------------
-    # PUNTUACIÓN SHORT
-    # -------------------------
+
+    # =========================
+    # SHORT SCORE
+    # =========================
 
     short_score = 0
 
@@ -150,12 +172,17 @@ for i in range(next_available_index, len(df) - 1):
     if current["MACD_HIST"] < df.iloc[i - 1]["MACD_HIST"]:
         short_score += 1
 
-    if current["high"] < df.iloc[i - 1]["high"] and current["low"] < df.iloc[i - 1]["low"]:
+    if (
+        current["high"] < df.iloc[i - 1]["high"]
+        and
+        current["low"] < df.iloc[i - 1]["low"]
+    ):
         short_score += 1
 
-    # -------------------------
+
+    # =========================
     # SEÑAL
-    # -------------------------
+    # =========================
 
     signal = None
 
@@ -175,24 +202,37 @@ for i in range(next_available_index, len(df) - 1):
     ):
         signal = "SHORT"
 
+
+    # No hay señal
     if signal is None:
+        i += 1
         continue
+
+
+    # =========================
+    # ENTRADA
+    # =========================
 
     entry = price
 
     if signal == "LONG":
+
         stop = entry - atr * 1.5
         target = entry + atr * 3
 
     else:
+
         stop = entry + atr * 1.5
         target = entry - atr * 3
 
-    # -------------------------
-    # BUSCAR RESULTADO
-    # -------------------------
+
+    # =========================
+    # BUSCAR TP / SL
+    # =========================
 
     result = None
+    exit_price = None
+    exit_index = None
 
     for j in range(i + 1, len(df)):
 
@@ -201,35 +241,48 @@ for i in range(next_available_index, len(df) - 1):
         if signal == "LONG":
 
             if future["low"] <= stop:
+
                 result = "LOSS"
                 exit_price = stop
+                exit_index = j
                 break
 
             if future["high"] >= target:
+
                 result = "WIN"
                 exit_price = target
+                exit_index = j
                 break
+
 
         else:
 
             if future["high"] >= stop:
+
                 result = "LOSS"
                 exit_price = stop
+                exit_index = j
                 break
 
             if future["low"] <= target:
+
                 result = "WIN"
                 exit_price = target
+                exit_index = j
                 break
 
-if result is None:
-    continue
 
-# La siguiente operación solo puede empezar
-# después de cerrar esta operación
+    # No llegó ni a TP ni a SL
+    if result is None:
+
+        break
 
 
-trades.append({
+    # =========================
+    # GUARDAR OPERACIÓN
+    # =========================
+
+    trades.append({
         "datetime": current["datetime"],
         "signal": signal,
         "entry": entry,
@@ -240,13 +293,23 @@ trades.append({
     })
 
 
+    # =========================
+    # IMPORTANTE:
+    # saltamos hasta después
+    # de cerrar la operación
+    # =========================
+
+    i = exit_index + 1
+
+
 # =========================
 # RESULTADOS
 # =========================
 
 results = pd.DataFrame(trades)
 
-print("\n=========================")
+print()
+print("=========================")
 print("RESULTADOS BACKTEST")
 print("=========================")
 
@@ -255,15 +318,19 @@ print("OPERACIONES:", len(results))
 if len(results) > 0:
 
     wins = (results["result"] == "WIN").sum()
+
     losses = (results["result"] == "LOSS").sum()
 
     winrate = wins / len(results) * 100
 
     print("GANADORAS:", wins)
+
     print("PERDEDORAS:", losses)
+
     print(f"WIN RATE: {winrate:.2f}%")
 
-    print("\nÚLTIMAS OPERACIONES:")
+    print()
+    print("ÚLTIMAS OPERACIONES:")
 
     print(
         results[
