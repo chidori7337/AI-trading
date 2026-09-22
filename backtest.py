@@ -82,3 +82,191 @@ print("\nINDICADORES CALCULADOS CORRECTAMENTE")
 print("VELAS OBTENIDAS:", len(df))
 print("DESDE:", df["datetime"].iloc[0])
 print("HASTA:", df["datetime"].iloc[-1])
+
+# =========================
+# BACKTEST
+# =========================
+
+trades = []
+
+for i in range(200, len(df) - 1):
+
+    current = df.iloc[i]
+
+    price = current["close"]
+    atr = current["ATR"]
+
+    if pd.isna(atr):
+        continue
+
+    # -------------------------
+    # PUNTUACIÓN LONG
+    # -------------------------
+
+    long_score = 0
+
+    if price > current["EMA20"]:
+        long_score += 1
+
+    if current["EMA20"] > current["EMA50"]:
+        long_score += 1
+
+    if current["EMA50"] > current["EMA200"]:
+        long_score += 1
+
+    if current["RSI"] > 52:
+        long_score += 1
+
+    if current["MACD"] > current["MACD_SIGNAL"]:
+        long_score += 1
+
+    if current["MACD_HIST"] > df.iloc[i - 1]["MACD_HIST"]:
+        long_score += 1
+
+    if current["high"] > df.iloc[i - 1]["high"] and current["low"] > df.iloc[i - 1]["low"]:
+        long_score += 1
+
+    # -------------------------
+    # PUNTUACIÓN SHORT
+    # -------------------------
+
+    short_score = 0
+
+    if price < current["EMA20"]:
+        short_score += 1
+
+    if current["EMA20"] < current["EMA50"]:
+        short_score += 1
+
+    if current["EMA50"] < current["EMA200"]:
+        short_score += 1
+
+    if current["RSI"] < 48:
+        short_score += 1
+
+    if current["MACD"] < current["MACD_SIGNAL"]:
+        short_score += 1
+
+    if current["MACD_HIST"] < df.iloc[i - 1]["MACD_HIST"]:
+        short_score += 1
+
+    if current["high"] < df.iloc[i - 1]["high"] and current["low"] < df.iloc[i - 1]["low"]:
+        short_score += 1
+
+    # -------------------------
+    # SEÑAL
+    # -------------------------
+
+    signal = None
+
+    if (
+        long_score >= 6
+        and price > current["EMA20"]
+        and current["EMA20"] > current["EMA50"]
+        and long_score > short_score
+    ):
+        signal = "LONG"
+
+    elif (
+        short_score >= 6
+        and price < current["EMA20"]
+        and current["EMA20"] < current["EMA50"]
+        and short_score > long_score
+    ):
+        signal = "SHORT"
+
+    if signal is None:
+        continue
+
+    entry = price
+
+    if signal == "LONG":
+        stop = entry - atr * 1.5
+        target = entry + atr * 3
+
+    else:
+        stop = entry + atr * 1.5
+        target = entry - atr * 3
+
+    # -------------------------
+    # BUSCAR RESULTADO
+    # -------------------------
+
+    result = None
+
+    for j in range(i + 1, len(df)):
+
+        future = df.iloc[j]
+
+        if signal == "LONG":
+
+            if future["low"] <= stop:
+                result = "LOSS"
+                exit_price = stop
+                break
+
+            if future["high"] >= target:
+                result = "WIN"
+                exit_price = target
+                break
+
+        else:
+
+            if future["high"] >= stop:
+                result = "LOSS"
+                exit_price = stop
+                break
+
+            if future["low"] <= target:
+                result = "WIN"
+                exit_price = target
+                break
+
+    if result is None:
+        continue
+
+    trades.append({
+        "datetime": current["datetime"],
+        "signal": signal,
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "result": result,
+        "exit": exit_price
+    })
+
+
+# =========================
+# RESULTADOS
+# =========================
+
+results = pd.DataFrame(trades)
+
+print("\n=========================")
+print("RESULTADOS BACKTEST")
+print("=========================")
+
+print("OPERACIONES:", len(results))
+
+if len(results) > 0:
+
+    wins = (results["result"] == "WIN").sum()
+    losses = (results["result"] == "LOSS").sum()
+
+    winrate = wins / len(results) * 100
+
+    print("GANADORAS:", wins)
+    print("PERDEDORAS:", losses)
+    print(f"WIN RATE: {winrate:.2f}%")
+
+    print("\nÚLTIMAS OPERACIONES:")
+
+    print(
+        results[
+            ["datetime", "signal", "entry", "result"]
+        ].tail(10).to_string(index=False)
+    )
+
+else:
+
+    print("NO SE ENCONTRARON OPERACIONES")
