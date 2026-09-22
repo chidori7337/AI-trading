@@ -299,13 +299,14 @@ trades.append({
     "R": r_result
 })
 
+i = exit_index + 1
     # =========================
     # IMPORTANTE:
     # saltamos hasta después
     # de cerrar la operación
     # =========================
 
-    i = exit_index + 1
+
 
 
 # =========================
