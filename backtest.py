@@ -42,9 +42,21 @@ print("HASTA:", df["datetime"].iloc[-1])
 # INDICADORES
 # =========================
 
-df["EMA20"] = df["close"].ewm(span=20, adjust=False).mean()
-df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
-df["EMA200"] = df["close"].ewm(span=200, adjust=False).mean()
+df["EMA20"] = df["close"].ewm(
+    span=20,
+    adjust=False
+).mean()
+
+df["EMA50"] = df["close"].ewm(
+    span=50,
+    adjust=False
+).mean()
+
+df["EMA200"] = df["close"].ewm(
+    span=200,
+    adjust=False
+).mean()
+
 
 # RSI
 
@@ -63,8 +75,15 @@ df["RSI"] = 100 - (100 / (1 + rs))
 
 # MACD
 
-ema12 = df["close"].ewm(span=12, adjust=False).mean()
-ema26 = df["close"].ewm(span=26, adjust=False).mean()
+ema12 = df["close"].ewm(
+    span=12,
+    adjust=False
+).mean()
+
+ema26 = df["close"].ewm(
+    span=26,
+    adjust=False
+).mean()
 
 df["MACD"] = ema12 - ema26
 
@@ -142,8 +161,7 @@ while i < len(df) - 1:
 
     if (
         current["high"] > df.iloc[i - 1]["high"]
-        and
-        current["low"] > df.iloc[i - 1]["low"]
+        and current["low"] > df.iloc[i - 1]["low"]
     ):
         long_score += 1
 
@@ -174,8 +192,7 @@ while i < len(df) - 1:
 
     if (
         current["high"] < df.iloc[i - 1]["high"]
-        and
-        current["low"] < df.iloc[i - 1]["low"]
+        and current["low"] < df.iloc[i - 1]["low"]
     ):
         short_score += 1
 
@@ -204,6 +221,7 @@ while i < len(df) - 1:
 
 
     # No hay señal
+
     if signal is None:
         i += 1
         continue
@@ -254,7 +272,6 @@ while i < len(df) - 1:
                 exit_index = j
                 break
 
-
         else:
 
             if future["high"] >= stop:
@@ -273,40 +290,42 @@ while i < len(df) - 1:
 
 
     # No llegó ni a TP ni a SL
-    if result is None:
 
+    if result is None:
         break
+
+
+    # =========================
+    # RESULTADO EN R
+    # =========================
+
+    if result == "WIN":
+        r_result = 2
+    else:
+        r_result = -1
 
 
     # =========================
     # GUARDAR OPERACIÓN
     # =========================
-risk = abs(entry - stop)
 
-if result == "WIN":
-    r_result = 2
-else:
-    r_result = -1
+    trades.append({
+        "datetime": current["datetime"],
+        "signal": signal,
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "result": result,
+        "exit": exit_price,
+        "R": r_result
+    })
 
-trades.append({
-    "datetime": current["datetime"],
-    "signal": signal,
-    "entry": entry,
-    "stop": stop,
-    "target": target,
-    "result": result,
-    "exit": exit_price,
-    "R": r_result
-})
 
-i = exit_index + 1
     # =========================
-    # IMPORTANTE:
-    # saltamos hasta después
-    # de cerrar la operación
+    # SIGUIENTE OPERACIÓN
     # =========================
 
-
+    i = exit_index + 1
 
 
 # =========================
@@ -330,24 +349,26 @@ if len(results) > 0:
 
     winrate = wins / len(results) * 100
 
+    total_r = results["R"].sum()
+
+    average_r = results["R"].mean()
+
     print("GANADORAS:", wins)
 
     print("PERDEDORAS:", losses)
 
     print(f"WIN RATE: {winrate:.2f}%")
 
-total_r = results["R"].sum()
-average_r = results["R"].mean()
+    print(f"RESULTADO TOTAL: {total_r:.2f} R")
 
-print(f"RESULTADO TOTAL: {total_r:.2f} R")
-print(f"PROMEDIO POR OPERACIÓN: {average_r:.3f} R")
-    
+    print(f"PROMEDIO POR OPERACIÓN: {average_r:.3f} R")
+
     print()
     print("ÚLTIMAS OPERACIONES:")
 
     print(
         results[
-            ["datetime", "signal", "entry", "result"]
+            ["datetime", "signal", "entry", "result", "R"]
         ].tail(10).to_string(index=False)
     )
 
