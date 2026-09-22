@@ -281,17 +281,23 @@ while i < len(df) - 1:
     # =========================
     # GUARDAR OPERACIÓN
     # =========================
+risk = abs(entry - stop)
 
-    trades.append({
-        "datetime": current["datetime"],
-        "signal": signal,
-        "entry": entry,
-        "stop": stop,
-        "target": target,
-        "result": result,
-        "exit": exit_price
-    })
+if result == "WIN":
+    r_result = 2
+else:
+    r_result = -1
 
+trades.append({
+    "datetime": current["datetime"],
+    "signal": signal,
+    "entry": entry,
+    "stop": stop,
+    "target": target,
+    "result": result,
+    "exit": exit_price,
+    "R": r_result
+})
 
     # =========================
     # IMPORTANTE:
