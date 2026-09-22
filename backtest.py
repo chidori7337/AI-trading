@@ -88,9 +88,9 @@ print("HASTA:", df["datetime"].iloc[-1])
 # =========================
 
 trades = []
+next_available_index = 200
 
-for i in range(200, len(df) - 1):
-
+for i in range(next_available_index, len(df) - 1):
     current = df.iloc[i]
 
     price = current["close"]
@@ -222,10 +222,14 @@ for i in range(200, len(df) - 1):
                 exit_price = target
                 break
 
-    if result is None:
-        continue
+if result is None:
+    continue
 
-    trades.append({
+# La siguiente operación solo puede empezar
+# después de cerrar esta operación
+next_available_index = j + 1
+
+trades.append({
         "datetime": current["datetime"],
         "signal": signal,
         "entry": entry,
