@@ -153,10 +153,10 @@ while i < len(df) - 1:
     if current["RSI"] > 52:
         long_score += 1
 
-    if current["MACD"] > current["MACD_SIGNAL"]:
+    if current["MACD"] > current["MACD_SIGNAL"]
         long_score += 1
 
-    if current["MACD_HIST"] > df.iloc[i - 1]["MACD_HIST"]:
+    if current["MACD_HIST"] > df.iloc[i - 1]["MACD_HIST"]
         long_score += 1
 
     if (
@@ -184,10 +184,10 @@ while i < len(df) - 1:
     if current["RSI"] < 48:
         short_score += 1
 
-    if current["MACD"] < current["MACD_SIGNAL"]:
+    if current["MACD"] < current["MACD_SIGNAL"]
         short_score += 1
 
-    if current["MACD_HIST"] < df.iloc[i - 1]["MACD_HIST"]:
+    if current["MACD_HIST"] < df.iloc[i - 1]["MACD_HIST"]
         short_score += 1
 
     if (
@@ -204,7 +204,7 @@ while i < len(df) - 1:
     signal = None
 
     if (
-        long_score >= 7
+        long_score >= 5
         and price > current["EMA20"]
         and current["EMA20"] > current["EMA50"]
         and long_score > short_score
@@ -212,7 +212,7 @@ while i < len(df) - 1:
         signal = "LONG"
 
     elif (
-        short_score >= 7
+        short_score >= 5
         and price < current["EMA20"]
         and current["EMA20"] < current["EMA50"]
         and short_score > long_score
