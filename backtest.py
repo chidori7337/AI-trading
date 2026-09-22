@@ -204,7 +204,7 @@ while i < len(df) - 1:
     signal = None
 
     if (
-        long_score >= 5
+        long_score >= 7
         and price > current["EMA20"]
         and current["EMA20"] > current["EMA50"]
         and long_score > short_score
@@ -212,7 +212,7 @@ while i < len(df) - 1:
         signal = "LONG"
 
     elif (
-        short_score >= 5
+        short_score >= 7
         and price < current["EMA20"]
         and current["EMA20"] < current["EMA50"]
         and short_score > long_score
