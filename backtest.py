@@ -335,6 +335,12 @@ if len(results) > 0:
 
     print(f"WIN RATE: {winrate:.2f}%")
 
+total_r = results["R"].sum()
+average_r = results["R"].mean()
+
+print(f"RESULTADO TOTAL: {total_r:.2f} R")
+print(f"PROMEDIO POR OPERACIÓN: {average_r:.3f} R")
+    
     print()
     print("ÚLTIMAS OPERACIONES:")
 
