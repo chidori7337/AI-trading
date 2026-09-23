@@ -19,11 +19,10 @@ SCORE_THRESHOLD = 4
 # Gestión de riesgo
 ATR_PERIOD = 14
 SL_ATR = 1.5
-TP_ATR = 3.0
+TP_ATR = 2.5
 
-# Estructura:
-# Comparamos la vela actual con las 3 velas anteriores
-STRUCTURE_LOOKBACK = 3
+# Estructura
+STRUCTURE_LOOKBACK = 1
 
 
 # ============================================================
@@ -79,7 +78,11 @@ df.rename(
     inplace=True
 )
 
-df.dropna(subset=["Open", "High", "Low", "Close"], inplace=True)
+df.dropna(
+    subset=["Open", "High", "Low", "Close"],
+    inplace=True
+)
+
 df.reset_index(drop=True, inplace=True)
 
 
@@ -216,20 +219,11 @@ while i < len(df) - 1:
         long_score += 1
 
     # 5. Estructura alcista
-    if i >= STRUCTURE_LOOKBACK:
-
-        previous_bars = df.iloc[
-            i - STRUCTURE_LOOKBACK:i
-        ]
-
-        previous_high = previous_bars["High"].max()
-        previous_low = previous_bars["Low"].max()
-
-        if (
-            current["High"] > previous_high
-            and current["Low"] > previous_low
-        ):
-            long_score += 1
+    if (
+        current["High"] > df.iloc[i - 1]["High"]
+        and current["Low"] > df.iloc[i - 1]["Low"]
+    ):
+        long_score += 1
 
 
     # ========================================================
@@ -253,20 +247,11 @@ while i < len(df) - 1:
         short_score += 1
 
     # 5. Estructura bajista
-    if i >= STRUCTURE_LOOKBACK:
-
-        previous_bars = df.iloc[
-            i - STRUCTURE_LOOKBACK:i
-        ]
-
-        previous_high = previous_bars["High"].min()
-        previous_low = previous_bars["Low"].min()
-
-        if (
-            current["High"] < previous_high
-            and current["Low"] < previous_low
-        ):
-            short_score += 1
+    if (
+        current["High"] < df.iloc[i - 1]["High"]
+        and current["Low"] < df.iloc[i - 1]["Low"]
+    ):
+        short_score += 1
 
 
     # ========================================================
@@ -282,7 +267,7 @@ while i < len(df) - 1:
         signal = "SHORT"
 
 
-    # Si no hay señal, siguiente vela
+    # Sin señal
     if signal is None:
         i += 1
         continue
@@ -353,7 +338,7 @@ while i < len(df) - 1:
 
             if hit_target:
                 result = "WIN"
-                result_r = 2
+                result_r = TP_ATR / SL_ATR
                 exit_index = j
                 break
 
@@ -377,7 +362,7 @@ while i < len(df) - 1:
 
             if hit_target:
                 result = "WIN"
-                result_r = 2
+                result_r = TP_ATR / SL_ATR
                 exit_index = j
                 break
 
@@ -390,9 +375,6 @@ while i < len(df) - 1:
     # ========================================================
 
     if result is None:
-
-        # No contamos esta operación porque no sabemos
-        # si habría terminado en TP o SL.
         break
 
 
