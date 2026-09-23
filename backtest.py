@@ -154,9 +154,8 @@ while i < len(df) - 1:
         long_score += 1
 
 
-  if current["High"] > df.iloc[i - 3:i]["High"].max() and current["Low"] > df.iloc[i - 3:i]["Low"].min():
+if current["High"] > df.iloc[i - 3:i]["High"].max() and current["Low"] > df.iloc[i - 3:i]["Low"].min():
     long_score += 1
-
 
     # =========================
     # SHORT SCORE
@@ -177,10 +176,8 @@ while i < len(df) - 1:
         short_score += 1
 
 
-
 if current["High"] < df.iloc[i - 3:i]["High"].min() and current["Low"] < df.iloc[i - 3:i]["Low"].max():
     short_score += 1
-
 
     # =========================
     # SEÑAL
