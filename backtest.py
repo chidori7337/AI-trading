@@ -13,11 +13,11 @@ SYMBOL = "EUR/USD"
 INTERVAL = "5min"
 OUTPUT_SIZE = 5000
 
-# 4 condiciones:
-# 1. Precio vs EMA20
-# 2. EMA20 vs EMA50
-# 3. EMA50 vs EMA200
-# 4. Estructura de 1 vela
+# 4 condiciones para SHORT:
+# 1. Precio por debajo de EMA20
+# 2. EMA20 por debajo de EMA50
+# 3. EMA50 por debajo de EMA200
+# 4. Estructura bajista de 1 vela
 SCORE_THRESHOLD = 4
 
 # Gestión de riesgo
@@ -160,7 +160,7 @@ print("INDICADORES CALCULADOS CORRECTAMENTE")
 
 
 # ============================================================
-# BACKTEST
+# BACKTEST SOLO SHORT
 # ============================================================
 
 trades = []
@@ -172,32 +172,7 @@ while i < len(df) - 1:
 
     current = df.iloc[i]
 
-    long_score = 0
     short_score = 0
-
-
-    # ========================================================
-    # LONG
-    # ========================================================
-
-    # 1. Precio por encima de EMA20
-    if current["Close"] > current["EMA20"]:
-        long_score += 1
-
-    # 2. EMA20 por encima de EMA50
-    if current["EMA20"] > current["EMA50"]:
-        long_score += 1
-
-    # 3. EMA50 por encima de EMA200
-    if current["EMA50"] > current["EMA200"]:
-        long_score += 1
-
-    # 4. Estructura alcista de 1 vela
-    if (
-        current["High"] > df.iloc[i - 1]["High"]
-        and current["Low"] > df.iloc[i - 1]["Low"]
-    ):
-        long_score += 1
 
 
     # ========================================================
@@ -228,19 +203,11 @@ while i < len(df) - 1:
     # DECIDIR SEÑAL
     # ========================================================
 
-    signal = None
-
-    if long_score >= SCORE_THRESHOLD:
-        signal = "LONG"
-
-    elif short_score >= SCORE_THRESHOLD:
-        signal = "SHORT"
-
-
-    # Sin señal
-    if signal is None:
+    if short_score < SCORE_THRESHOLD:
         i += 1
         continue
+
+    signal = "SHORT"
 
 
     # ========================================================
@@ -259,15 +226,8 @@ while i < len(df) - 1:
     # STOP Y TARGET
     # ========================================================
 
-    if signal == "LONG":
-
-        stop = entry - (SL_ATR * atr)
-        target = entry + (TP_ATR * atr)
-
-    else:
-
-        stop = entry + (SL_ATR * atr)
-        target = entry - (TP_ATR * atr)
+    stop = entry + (SL_ATR * atr)
+    target = entry - (TP_ATR * atr)
 
 
     # ========================================================
@@ -290,51 +250,26 @@ while i < len(df) - 1:
 
 
         # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
-
-        if signal == "LONG":
-
-            hit_stop = low <= stop
-            hit_target = high >= target
-
-            # Si toca ambos en la misma vela,
-            # primero contamos el STOP.
-            if hit_stop:
-                result = "LOSS"
-                result_r = -1
-                exit_index = j
-                break
-
-            if hit_target:
-                result = "WIN"
-                result_r = 2
-                exit_index = j
-                break
-
-
-        # ----------------------------------------------------
         # SHORT
         # ----------------------------------------------------
 
-        else:
+        hit_stop = high >= stop
+        hit_target = low <= target
 
-            hit_stop = high >= stop
-            hit_target = low <= target
+        # Si toca ambos en la misma vela,
+        # mantenemos el criterio conservador:
+        # primero contamos el STOP.
+        if hit_stop:
+            result = "LOSS"
+            result_r = -1
+            exit_index = j
+            break
 
-            # Si toca ambos en la misma vela,
-            # primero contamos el STOP.
-            if hit_stop:
-                result = "LOSS"
-                result_r = -1
-                exit_index = j
-                break
-
-            if hit_target:
-                result = "WIN"
-                result_r = 2
-                exit_index = j
-                break
+        if hit_target:
+            result = "WIN"
+            result_r = 2
+            exit_index = j
+            break
 
 
         j += 1
@@ -381,7 +316,7 @@ results = pd.DataFrame(trades)
 
 print()
 print("=========================")
-print("RESULTADOS BACKTEST")
+print("RESULTADOS SOLO SHORT")
 print("=========================")
 
 
@@ -392,10 +327,6 @@ if results.empty:
     print()
 
 else:
-
-    # ========================================================
-    # RESULTADOS GENERALES
-    # ========================================================
 
     total_trades = len(results)
 
@@ -428,111 +359,11 @@ else:
 
 
     # ========================================================
-    # RESULTADOS LONG
-    # ========================================================
-
-    long_results = results[
-        results["signal"] == "LONG"
-    ]
-
-    if not long_results.empty:
-
-        long_total = len(long_results)
-        long_winners = (
-            long_results["result"] == "WIN"
-        ).sum()
-        long_losers = (
-            long_results["result"] == "LOSS"
-        ).sum()
-
-        long_win_rate = (
-            long_winners / long_total
-        ) * 100
-
-        long_r = long_results["R"].sum()
-        long_avg_r = long_results["R"].mean()
-
-        print()
-        print("=========================")
-        print("RESULTADOS LONG")
-        print("=========================")
-
-        print()
-        print("OPERACIONES:", long_total)
-
-        print()
-        print("GANADORAS:", long_winners)
-
-        print()
-        print("PERDEDORAS:", long_losers)
-
-        print()
-        print(f"WIN RATE LONG: {long_win_rate:.2f}%")
-
-        print()
-        print(f"RESULTADO LONG: {long_r:.2f} R")
-
-        print()
-        print(f"PROMEDIO LONG: {long_avg_r:.3f} R")
-
-
-    # ========================================================
-    # RESULTADOS SHORT
-    # ========================================================
-
-    short_results = results[
-        results["signal"] == "SHORT"
-    ]
-
-    if not short_results.empty:
-
-        short_total = len(short_results)
-        short_winners = (
-            short_results["result"] == "WIN"
-        ).sum()
-        short_losers = (
-            short_results["result"] == "LOSS"
-        ).sum()
-
-        short_win_rate = (
-            short_winners / short_total
-        ) * 100
-
-        short_r = short_results["R"].sum()
-        short_avg_r = short_results["R"].mean()
-
-        print()
-        print("=========================")
-        print("RESULTADOS SHORT")
-        print("=========================")
-
-        print()
-        print("OPERACIONES:", short_total)
-
-        print()
-        print("GANADORAS:", short_winners)
-
-        print()
-        print("PERDEDORAS:", short_losers)
-
-        print()
-        print(f"WIN RATE SHORT: {short_win_rate:.2f}%")
-
-        print()
-        print(f"RESULTADO SHORT: {short_r:.2f} R")
-
-        print()
-        print(f"PROMEDIO SHORT: {short_avg_r:.3f} R")
-
-
-    # ========================================================
     # ÚLTIMAS OPERACIONES
     # ========================================================
 
     print()
-    print("=========================")
-    print("ÚLTIMAS OPERACIONES")
-    print("=========================")
+    print("ÚLTIMAS OPERACIONES:")
     print()
 
     print(
