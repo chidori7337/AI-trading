@@ -19,32 +19,14 @@ OUTPUT_SIZE = 5000
 # ESTRATEGIA CONGELADA
 # ============================================================
 
-# 4/4 condiciones originales
 SCORE_THRESHOLD = 4
 
-# Indicadores
 ATR_PERIOD = 14
 
-# Gestión de riesgo
 SL_ATR = 1.5
 TP_ATR = 3.0
 
-# Estructura de 1 vela
 STRUCTURE_LOOKBACK = 1
-
-
-# ============================================================
-# COSTES HIPOTÉTICOS
-# ============================================================
-
-# 1 pip en EUR/USD
-PIP_SIZE = 0.0001
-
-COST_SCENARIOS_PIPS = [
-    0.5,
-    1.0,
-    1.5
-]
 
 
 # ============================================================
@@ -112,7 +94,7 @@ if not API_KEY:
 
 
 # ============================================================
-# DESCARGAR DATOS CON REINTENTOS
+# DESCARGAR DATOS
 # ============================================================
 
 def download_data(end_date):
@@ -135,6 +117,7 @@ def download_data(end_date):
         "apikey": API_KEY,
 
         "format": "JSON"
+
     }
 
 
@@ -148,26 +131,22 @@ def download_data(end_date):
         try:
 
             response = requests.get(
-
                 url,
-
                 params=params,
-
                 timeout=30
             )
-
 
         except requests.RequestException as error:
 
             if attempt == max_attempts - 1:
 
                 raise RuntimeError(
-                    f"Error de conexión con Twelve Data: {error}"
+                    f"Error conectando con Twelve Data: {error}"
                 )
 
 
-            wait_seconds = 15 * (
-                attempt + 1
+            wait_seconds = (
+                20 * (attempt + 1)
             )
 
 
@@ -187,11 +166,12 @@ def download_data(end_date):
                 wait_seconds
             )
 
+
             continue
 
 
         # ====================================================
-        # RATE LIMIT 429
+        # RATE LIMIT
         # ====================================================
 
         if response.status_code == 429:
@@ -249,19 +229,7 @@ def download_data(end_date):
             continue
 
 
-        # ====================================================
-        # OTROS ERRORES HTTP
-        # ====================================================
-
-        try:
-
-            response.raise_for_status()
-
-        except requests.HTTPError as error:
-
-            raise RuntimeError(
-                f"Error HTTP de Twelve Data: {error}"
-            )
+        response.raise_for_status()
 
 
         # ====================================================
@@ -276,13 +244,9 @@ def download_data(end_date):
 
             raise RuntimeError(
                 "Twelve Data devolvió una respuesta "
-                "que no es JSON válido."
+                "no válida."
             )
 
-
-        # ====================================================
-        # COMPROBAR DATOS
-        # ====================================================
 
         if "values" not in data:
 
@@ -313,75 +277,49 @@ def download_data(end_date):
 
 
         for column in [
-
             "open",
-
             "high",
-
             "low",
-
             "close"
-
         ]:
 
             df[column] = pd.to_numeric(
-
                 df[column],
-
                 errors="coerce"
             )
 
 
         df = (
-
             df
-
             .sort_values("datetime")
-
             .reset_index(drop=True)
         )
 
 
         df.rename(
-
             columns={
-
                 "open": "Open",
-
                 "high": "High",
-
                 "low": "Low",
-
                 "close": "Close"
-
             },
-
             inplace=True
         )
 
 
         df.dropna(
-
             subset=[
-
                 "Open",
-
                 "High",
-
                 "Low",
-
                 "Close"
-
             ],
-
             inplace=True
         )
 
 
         df.reset_index(
-
             drop=True,
-
             inplace=True
         )
 
@@ -390,50 +328,35 @@ def download_data(end_date):
 
 
     raise RuntimeError(
-
         "No se pudieron descargar los datos "
         "después de varios intentos."
     )
 
 
 # ============================================================
-# CALCULAR INDICADORES
+# INDICADORES
 # ============================================================
 
 def calculate_indicators(df):
 
     # ========================================================
-    # EMA20
+    # EMA
     # ========================================================
 
     df["EMA20"] = df["Close"].ewm(
-
         span=20,
-
         adjust=False
     ).mean()
 
-
-    # ========================================================
-    # EMA50
-    # ========================================================
 
     df["EMA50"] = df["Close"].ewm(
-
         span=50,
-
         adjust=False
     ).mean()
 
 
-    # ========================================================
-    # EMA200
-    # ========================================================
-
     df["EMA200"] = df["Close"].ewm(
-
         span=200,
-
         adjust=False
     ).mean()
 
@@ -469,25 +392,18 @@ def calculate_indicators(df):
 
 
     true_range = pd.concat(
-
         [
             tr1,
             tr2,
             tr3
-
         ],
-
         axis=1
-
     ).max(axis=1)
 
 
     df["ATR"] = true_range.ewm(
-
         alpha=1 / ATR_PERIOD,
-
         adjust=False
-
     ).mean()
 
 
@@ -496,27 +412,18 @@ def calculate_indicators(df):
     # ========================================================
 
     df.dropna(
-
         subset=[
-
             "EMA20",
-
             "EMA50",
-
             "EMA200",
-
             "ATR"
-
         ],
-
         inplace=True
     )
 
 
     df.reset_index(
-
         drop=True,
-
         inplace=True
     )
 
@@ -525,12 +432,10 @@ def calculate_indicators(df):
 
 
 # ============================================================
-# DRAWDOWN MÁXIMO
+# DRAWDOWN
 # ============================================================
 
-def calculate_max_drawdown(
-    results
-):
+def calculate_max_drawdown(results):
 
     if results.empty:
 
@@ -563,9 +468,7 @@ def calculate_max_drawdown(
 # PEOR RACHA DE PÉRDIDAS
 # ============================================================
 
-def calculate_max_losing_streak(
-    results
-):
+def calculate_max_losing_streak(results):
 
     max_streak = 0
 
@@ -584,11 +487,8 @@ def calculate_max_losing_streak(
 
 
         max_streak = max(
-
             max_streak,
-
             current_streak
-
         )
 
 
@@ -599,33 +499,21 @@ def calculate_max_losing_streak(
 # PROFIT FACTOR
 # ============================================================
 
-def calculate_profit_factor(
-    results
-):
+def calculate_profit_factor(results):
 
     gross_profit = (
-
         results.loc[
-
             results["R"] > 0,
-
             "R"
-
         ].sum()
-
     )
 
 
     gross_loss = (
-
         results.loc[
-
             results["R"] < 0,
-
             "R"
-
         ].abs().sum()
-
     )
 
 
@@ -635,115 +523,10 @@ def calculate_profit_factor(
 
 
     return (
-
         gross_profit
         /
         gross_loss
-
     )
-
-
-# ============================================================
-# ESTADÍSTICAS DE DURACIÓN
-# ============================================================
-
-def calculate_duration_stats(
-    results
-):
-
-    if results.empty:
-
-        return {
-
-            "average_minutes": 0,
-
-            "median_minutes": 0,
-
-            "under_1h_pct": 0,
-
-            "between_1_3h_pct": 0,
-
-            "over_3h_pct": 0,
-
-            "max_minutes": 0
-        }
-
-
-    durations = (
-        results["duration_minutes"]
-    )
-
-
-    return {
-
-        "average_minutes":
-            durations.mean(),
-
-        "median_minutes":
-            durations.median(),
-
-        "under_1h_pct":
-            (
-                durations < 60
-            ).mean() * 100,
-
-        "between_1_3h_pct":
-            (
-                (durations >= 60)
-                &
-                (durations <= 180)
-            ).mean() * 100,
-
-        "over_3h_pct":
-            (
-                durations > 180
-            ).mean() * 100,
-
-        "max_minutes":
-            durations.max()
-    }
-
-
-# ============================================================
-# COSTES HIPOTÉTICOS
-# ============================================================
-
-def calculate_cost_adjusted_r(
-    results,
-    cost_pips
-):
-
-    if results.empty:
-
-        return 0.0
-
-
-    cost_price = (
-        cost_pips
-        *
-        PIP_SIZE
-    )
-
-
-    cost_r = (
-
-        cost_price
-        /
-        results["risk_distance"]
-
-    )
-
-
-    adjusted_r = (
-
-        results["R"]
-        -
-        cost_r
-
-    )
-
-
-    return adjusted_r.sum()
 
 
 # ============================================================
@@ -772,40 +555,20 @@ def run_backtest(df):
         # LONG ORIGINAL
         # ====================================================
 
-        # 1. Precio > EMA20
-
-        if (
-            current["Close"]
-            >
-            current["EMA20"]
-        ):
+        if current["Close"] > current["EMA20"]:
 
             long_score += 1
 
 
-        # 2. EMA20 > EMA50
-
-        if (
-            current["EMA20"]
-            >
-            current["EMA50"]
-        ):
+        if current["EMA20"] > current["EMA50"]:
 
             long_score += 1
 
 
-        # 3. EMA50 > EMA200
-
-        if (
-            current["EMA50"]
-            >
-            current["EMA200"]
-        ):
+        if current["EMA50"] > current["EMA200"]:
 
             long_score += 1
 
-
-        # 4. Estructura alcista
 
         if (
             current["High"]
@@ -830,40 +593,20 @@ def run_backtest(df):
         # SHORT ORIGINAL
         # ====================================================
 
-        # 1. Precio < EMA20
-
-        if (
-            current["Close"]
-            <
-            current["EMA20"]
-        ):
+        if current["Close"] < current["EMA20"]:
 
             short_score += 1
 
 
-        # 2. EMA20 < EMA50
-
-        if (
-            current["EMA20"]
-            <
-            current["EMA50"]
-        ):
+        if current["EMA20"] < current["EMA50"]:
 
             short_score += 1
 
 
-        # 3. EMA50 < EMA200
-
-        if (
-            current["EMA50"]
-            <
-            current["EMA200"]
-        ):
+        if current["EMA50"] < current["EMA200"]:
 
             short_score += 1
 
-
-        # 4. Estructura bajista
 
         if (
             current["High"]
@@ -891,23 +634,17 @@ def run_backtest(df):
         original_signal = None
 
 
-        if (
-            long_score
-            >=
-            SCORE_THRESHOLD
-        ):
+        if long_score >= SCORE_THRESHOLD:
 
             original_signal = "LONG"
 
 
-        elif (
-            short_score
-            >=
-            SCORE_THRESHOLD
-        ):
+        elif short_score >= SCORE_THRESHOLD:
 
             original_signal = "SHORT"
 
+
+        # Sin señal
 
         if original_signal is None:
 
@@ -945,10 +682,6 @@ def run_backtest(df):
             continue
 
 
-        # ====================================================
-        # DISTANCIA DE RIESGO
-        # ====================================================
-
         risk_distance = (
             SL_ATR
             *
@@ -972,11 +705,7 @@ def run_backtest(df):
             target = (
                 entry
                 +
-                (
-                    TP_ATR
-                    *
-                    atr
-                )
+                (TP_ATR * atr)
             )
 
 
@@ -992,11 +721,7 @@ def run_backtest(df):
             target = (
                 entry
                 -
-                (
-                    TP_ATR
-                    *
-                    atr
-                )
+                (TP_ATR * atr)
             )
 
 
@@ -1040,9 +765,6 @@ def run_backtest(df):
                 )
 
 
-                # Si toca ambos:
-                # criterio conservador = STOP.
-
                 if hit_stop:
 
                     result = "LOSS"
@@ -1081,8 +803,6 @@ def run_backtest(df):
                 )
 
 
-                # Criterio conservador.
-
                 if hit_stop:
 
                     result = "LOSS"
@@ -1118,7 +838,7 @@ def run_backtest(df):
 
 
         # ====================================================
-        # TIEMPO DE LA OPERACIÓN
+        # DURACIÓN
         # ====================================================
 
         entry_time = (
@@ -1200,10 +920,226 @@ def run_backtest(df):
 
 
 # ============================================================
+# CLASIFICAR DURACIÓN
+# ============================================================
+
+def duration_bucket(minutes):
+
+    if minutes < 30:
+
+        return "< 30 min"
+
+
+    if minutes < 60:
+
+        return "30-60 min"
+
+
+    if minutes < 120:
+
+        return "60-120 min"
+
+
+    if minutes <= 180:
+
+        return "120-180 min"
+
+
+    if minutes <= 360:
+
+        return "180-360 min"
+
+
+    return "> 360 min"
+
+
+# ============================================================
+# ORDEN DE LOS GRUPOS
+# ============================================================
+
+DURATION_ORDER = [
+
+    "< 30 min",
+
+    "30-60 min",
+
+    "60-120 min",
+
+    "120-180 min",
+
+    "180-360 min",
+
+    "> 360 min"
+]
+
+
+# ============================================================
+# RESULTADOS POR DURACIÓN
+# ============================================================
+
+def print_duration_analysis(
+    results
+):
+
+    if results.empty:
+
+        return
+
+
+    analysis = (
+        results
+        .copy()
+    )
+
+
+    analysis["duration_group"] = (
+        analysis["duration_minutes"]
+        .apply(duration_bucket)
+    )
+
+
+    print()
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "RESULTADOS POR DURACIÓN"
+    )
+
+    print(
+        "========================================"
+    )
+
+
+    total_operations = len(
+        analysis
+    )
+
+
+    for group in DURATION_ORDER:
+
+        group_results = analysis[
+            analysis["duration_group"]
+            ==
+            group
+        ]
+
+
+        if group_results.empty:
+
+            print()
+
+            print(
+                f"{group}: "
+                "0 operaciones"
+            )
+
+            continue
+
+
+        operations = len(
+            group_results
+        )
+
+
+        winners = (
+            group_results["result"]
+            ==
+            "WIN"
+        ).sum()
+
+
+        losers = (
+            group_results["result"]
+            ==
+            "LOSS"
+        ).sum()
+
+
+        win_rate = (
+            winners
+            /
+            operations
+        ) * 100
+
+
+        total_r = (
+            group_results["R"]
+            .sum()
+        )
+
+
+        average_r = (
+            group_results["R"]
+            .mean()
+        )
+
+
+        percentage = (
+            operations
+            /
+            total_operations
+        ) * 100
+
+
+        average_duration = (
+            group_results[
+                "duration_minutes"
+            ]
+            .mean()
+        )
+
+
+        print()
+
+        print(
+            f"{group}"
+        )
+
+        print(
+            f"  Operaciones: {operations}"
+        )
+
+        print(
+            f"  Porcentaje: {percentage:.2f}%"
+        )
+
+        print(
+            f"  Ganadoras: {winners}"
+        )
+
+        print(
+            f"  Perdedoras: {losers}"
+        )
+
+        print(
+            f"  Win rate: {win_rate:.2f}%"
+        )
+
+        print(
+            f"  R total: {total_r:.2f}"
+        )
+
+        print(
+            f"  R medio: {average_r:.3f}"
+        )
+
+        print(
+            f"  Duración media: "
+            f"{average_duration:.1f} min"
+        )
+
+
+# ============================================================
 # EJECUTAR PERIODOS
 # ============================================================
 
 all_results = []
+
+
+all_trades = []
 
 
 for period_index, period in enumerate(
@@ -1211,6 +1147,7 @@ for period_index, period in enumerate(
     VALIDATION_PERIODS,
 
     start=1
+
 ):
 
 
@@ -1220,6 +1157,7 @@ for period_index, period in enumerate(
 
 
     print()
+
     print()
 
     print(
@@ -1227,7 +1165,7 @@ for period_index, period in enumerate(
     )
 
     print(
-        f"{name}"
+        name
     )
 
     print(
@@ -1276,7 +1214,7 @@ for period_index, period in enumerate(
 
 
     # ========================================================
-    # CALCULAR INDICADORES
+    # INDICADORES
     # ========================================================
 
     df = calculate_indicators(
@@ -1374,32 +1312,16 @@ for period_index, period in enumerate(
     )
 
 
-    duration_stats = (
-        calculate_duration_stats(
-            results
-        )
+    average_duration = (
+        results["duration_minutes"]
+        .mean()
     )
 
 
-    # ========================================================
-    # COSTES
-    # ========================================================
-
-    cost_results = {}
-
-
-    for cost_pips in (
-        COST_SCENARIOS_PIPS
-    ):
-
-        cost_results[
-            cost_pips
-        ] = calculate_cost_adjusted_r(
-
-            results,
-
-            cost_pips
-        )
+    median_duration = (
+        results["duration_minutes"]
+        .median()
+    )
 
 
     # ========================================================
@@ -1456,7 +1378,7 @@ for period_index, period in enumerate(
     print()
 
     print(
-        f"RESULTADO BRUTO: "
+        f"RESULTADO: "
         f"{total_r:.2f} R"
     )
 
@@ -1480,7 +1402,7 @@ for period_index, period in enumerate(
     print()
 
     print(
-        f"PEOR RACHA DE PÉRDIDAS: "
+        f"PEOR RACHA: "
         f"{max_losing_streak}"
     )
 
@@ -1501,30 +1423,11 @@ for period_index, period in enumerate(
         )
 
 
-    # ========================================================
-    # DURACIÓN
-    # ========================================================
-
-    print()
-
-    print(
-        "========================="
-    )
-
-    print(
-        "DURACIÓN"
-    )
-
-    print(
-        "========================="
-    )
-
-
     print()
 
     print(
         f"DURACIÓN MEDIA: "
-        f"{duration_stats['average_minutes']:.1f} min"
+        f"{average_duration:.1f} min"
     )
 
 
@@ -1532,262 +1435,95 @@ for period_index, period in enumerate(
 
     print(
         f"DURACIÓN MEDIANA: "
-        f"{duration_stats['median_minutes']:.1f} min"
-    )
-
-
-    print()
-
-    print(
-        f"MENOS DE 1 HORA: "
-        f"{duration_stats['under_1h_pct']:.2f}%"
-    )
-
-
-    print()
-
-    print(
-        f"ENTRE 1 Y 3 HORAS: "
-        f"{duration_stats['between_1_3h_pct']:.2f}%"
-    )
-
-
-    print()
-
-    print(
-        f"MÁS DE 3 HORAS: "
-        f"{duration_stats['over_3h_pct']:.2f}%"
-    )
-
-
-    print()
-
-    print(
-        f"MÁXIMA DURACIÓN: "
-        f"{duration_stats['max_minutes']:.1f} min"
+        f"{median_duration:.1f} min"
     )
 
 
     # ========================================================
-    # COSTES
+    # ANÁLISIS DE DURACIÓN
     # ========================================================
 
-    print()
-
-    print(
-        "========================="
+    print_duration_analysis(
+        results
     )
-
-    print(
-        "ESCENARIOS DE COSTE"
-    )
-
-    print(
-        "========================="
-    )
-
-
-    for cost_pips in (
-        COST_SCENARIOS_PIPS
-    ):
-
-        print()
-
-        print(
-            f"{cost_pips:.1f} PIPS: "
-            f"{cost_results[cost_pips]:.2f} R"
-        )
 
 
     # ========================================================
-    # LONG
+    # GUARDAR TODAS LAS OPERACIONES
     # ========================================================
 
-    long_results = results[
-        results["signal"] == "LONG"
-    ]
-
-
-    # ========================================================
-    # SHORT
-    # ========================================================
-
-    short_results = results[
-        results["signal"] == "SHORT"
-    ]
-
-
-    print()
-
-    print(
-        "========================="
-    )
-
-    print(
-        "LONG / SHORT"
-    )
-
-    print(
-        "========================="
+    period_results = (
+        results
+        .copy()
     )
 
 
-    if not long_results.empty:
-
-        long_wins = (
-            long_results["result"]
-            ==
-            "WIN"
-        ).sum()
+    period_results["periodo"] = name
 
 
-        long_total = len(
-            long_results
-        )
-
-
-        long_win_rate = (
-            long_wins
-            /
-            long_total
-        ) * 100
-
-
-        long_r = (
-            long_results["R"]
-            .sum()
-        )
-
-
-        print()
-
-        print(
-            f"LONG: "
-            f"{long_total} ops | "
-            f"{long_win_rate:.2f}% | "
-            f"{long_r:.2f} R"
-        )
-
-
-    if not short_results.empty:
-
-        short_wins = (
-            short_results["result"]
-            ==
-            "WIN"
-        ).sum()
-
-
-        short_total = len(
-            short_results
-        )
-
-
-        short_win_rate = (
-            short_wins
-            /
-            short_total
-        ) * 100
-
-
-        short_r = (
-            short_results["R"]
-            .sum()
-        )
-
-
-        print()
-
-        print(
-            f"SHORT: "
-            f"{short_total} ops | "
-            f"{short_win_rate:.2f}% | "
-            f"{short_r:.2f} R"
-        )
+    all_trades.append(
+        period_results
+    )
 
 
     # ========================================================
     # GUARDAR RESUMEN
     # ========================================================
 
-    row = {
-
-        "periodo":
-            name,
-
-        "operaciones":
-            total_trades,
-
-        "ganadoras":
-            winners,
-
-        "perdedoras":
-            losers,
-
-        "win_rate":
-            win_rate,
-
-        "R_bruto":
-            total_r,
-
-        "R_promedio":
-            average_r,
-
-        "drawdown_max":
-            max_drawdown,
-
-        "racha_max":
-            max_losing_streak,
-
-        "profit_factor":
-            profit_factor,
-
-        "duracion_media_min":
-            duration_stats[
-                "average_minutes"
-            ],
-
-        "duracion_mediana_min":
-            duration_stats[
-                "median_minutes"
-            ],
-
-        "pct_1_3h":
-            duration_stats[
-                "between_1_3h_pct"
-            ],
-
-        "pct_mas_3h":
-            duration_stats[
-                "over_3h_pct"
-            ]
-    }
-
-
-    for cost_pips in (
-        COST_SCENARIOS_PIPS
-    ):
-
-        row[
-            f"R_con_{cost_pips}_pips"
-        ] = cost_results[
-            cost_pips
-        ]
-
-
     all_results.append(
-        row
+
+        {
+
+            "periodo":
+                name,
+
+            "operaciones":
+                total_trades,
+
+            "ganadoras":
+                winners,
+
+            "perdedoras":
+                losers,
+
+            "win_rate":
+                win_rate,
+
+            "R":
+                total_r,
+
+            "R_promedio":
+                average_r,
+
+            "drawdown":
+                max_drawdown,
+
+            "racha_max":
+                max_losing_streak,
+
+            "profit_factor":
+                profit_factor,
+
+            "duracion_media":
+                average_duration,
+
+            "duracion_mediana":
+                median_duration
+        }
+
     )
 
 
     # ========================================================
-    # PAUSA ENTRE PETICIONES
+    # PAUSA PARA EVITAR RATE LIMIT
     # ========================================================
 
     if (
         period_index
         <
-        len(VALIDATION_PERIODS)
+        len(
+            VALIDATION_PERIODS
+        )
     ):
 
         print()
@@ -1803,10 +1539,11 @@ for period_index, period in enumerate(
 
 
 # ============================================================
-# RESUMEN FINAL
+# COMBINAR TODAS LAS OPERACIONES
 # ============================================================
 
 print()
+
 print()
 
 print(
@@ -1814,7 +1551,7 @@ print(
 )
 
 print(
-    "AUDITORÍA FINAL"
+    "AUDITORÍA COMBINADA"
 )
 
 print(
@@ -1822,59 +1559,47 @@ print(
 )
 
 
-if not all_results:
+if not all_trades:
 
     print()
 
     print(
-        "No hubo resultados."
+        "No hubo operaciones."
     )
-
 
 else:
 
-    summary = pd.DataFrame(
-        all_results
+    combined_results = pd.concat(
+        all_trades,
+        ignore_index=True
     )
 
 
     # ========================================================
-    # TABLA COMPLETA
+    # ESTADÍSTICAS TOTALES
     # ========================================================
 
-    print()
-
-    print(
-        summary.to_string(
-            index=False
-        )
-    )
-
-
-    # ========================================================
-    # TOTAL
-    # ========================================================
-
-    total_operations = (
-        summary["operaciones"]
-        .sum()
+    total_operations = len(
+        combined_results
     )
 
 
     total_winners = (
-        summary["ganadoras"]
-        .sum()
-    )
+        combined_results["result"]
+        ==
+        "WIN"
+    ).sum()
 
 
     total_losers = (
-        summary["perdedoras"]
-        .sum()
-    )
+        combined_results["result"]
+        ==
+        "LOSS"
+    ).sum()
 
 
     total_r = (
-        summary["R_bruto"]
+        combined_results["R"]
         .sum()
     )
 
@@ -1888,7 +1613,7 @@ else:
     ) * 100
 
 
-    combined_average = (
+    combined_average_r = (
 
         total_r
         /
@@ -1897,18 +1622,40 @@ else:
     )
 
 
-    print()
-
-    print(
-        "========================================"
+    combined_duration = (
+        combined_results[
+            "duration_minutes"
+        ]
+        .mean()
     )
 
-    print(
-        "TOTAL COMBINADO"
+
+    combined_median_duration = (
+        combined_results[
+            "duration_minutes"
+        ]
+        .median()
     )
 
-    print(
-        "========================================"
+
+    combined_drawdown = (
+        calculate_max_drawdown(
+            combined_results
+        )
+    )
+
+
+    combined_losing_streak = (
+        calculate_max_losing_streak(
+            combined_results
+        )
+    )
+
+
+    combined_profit_factor = (
+        calculate_profit_factor(
+            combined_results
+        )
     )
 
 
@@ -1947,7 +1694,7 @@ else:
     print()
 
     print(
-        f"R BRUTO TOTAL: "
+        f"RESULTADO TOTAL: "
         f"{total_r:.2f} R"
     )
 
@@ -1955,143 +1702,64 @@ else:
     print()
 
     print(
-        f"R PROMEDIO: "
-        f"{combined_average:.3f} R"
+        f"R MEDIO: "
+        f"{combined_average_r:.3f}"
     )
 
-
-    # ========================================================
-    # COSTES COMBINADOS
-    # ========================================================
 
     print()
 
     print(
-        "========================================"
+        f"DRAWDOWN MÁXIMO: "
+        f"{combined_drawdown:.2f} R"
     )
+
+
+    print()
 
     print(
-        "RESULTADO DESPUÉS DE COSTES"
-    )
-
-    print(
-        "========================================"
+        f"PEOR RACHA: "
+        f"{combined_losing_streak}"
     )
 
 
-    for cost_pips in (
-        COST_SCENARIOS_PIPS
-    ):
+    print()
 
-        column = (
-            f"R_con_{cost_pips}_pips"
-        )
-
-
-        total_after_costs = (
-            summary[column]
-            .sum()
-        )
-
-
-        print()
+    if combined_profit_factor is not None:
 
         print(
-            f"{cost_pips:.1f} PIPS: "
-            f"{total_after_costs:.2f} R"
+            f"PROFIT FACTOR: "
+            f"{combined_profit_factor:.3f}"
         )
-
-
-    # ========================================================
-    # DURACIÓN COMBINADA
-    # ========================================================
-
-    weighted_average_duration = (
-
-        (
-            summary["duracion_media_min"]
-            *
-            summary["operaciones"]
-        ).sum()
-
-        /
-
-        total_operations
-
-    )
-
-
-    weighted_pct_1_3h = (
-
-        (
-            summary["pct_1_3h"]
-            *
-            summary["operaciones"]
-        ).sum()
-
-        /
-
-        total_operations
-
-    )
-
-
-    weighted_pct_over_3h = (
-
-        (
-            summary["pct_mas_3h"]
-            *
-            summary["operaciones"]
-        ).sum()
-
-        /
-
-        total_operations
-
-    )
-
-
-    print()
-
-    print(
-        "========================================"
-    )
-
-    print(
-        "DURACIÓN COMBINADA"
-    )
-
-    print(
-        "========================================"
-    )
 
 
     print()
 
     print(
         f"DURACIÓN MEDIA: "
-        f"{weighted_average_duration:.1f} min"
+        f"{combined_duration:.1f} min"
     )
 
 
     print()
 
     print(
-        f"OPERACIONES ENTRE 1 Y 3H: "
-        f"{weighted_pct_1_3h:.2f}%"
-    )
-
-
-    print()
-
-    print(
-        f"OPERACIONES DE MÁS DE 3H: "
-        f"{weighted_pct_over_3h:.2f}%"
+        f"DURACIÓN MEDIANA: "
+        f"{combined_median_duration:.1f} min"
     )
 
 
     # ========================================================
-    # NOTA FINAL
+    # DURACIONES COMBINADAS
+    # ========================================================
+
+    print_duration_analysis(
+        combined_results
+    )
+
+
+    # ========================================================
+    # RESULTADOS POR DIRECCIÓN
     # ========================================================
 
     print()
@@ -2101,38 +1769,115 @@ else:
     )
 
     print(
-        "NOTAS"
+        "LONG / SHORT COMBINADO"
     )
 
     print(
         "========================================"
     )
 
-    print()
 
-    print(
-        "La estrategia utilizada es la versión "
-        "invertida que hemos mantenido congelada."
-    )
+    long_results = combined_results[
+        combined_results["signal"]
+        ==
+        "LONG"
+    ]
 
-    print()
 
-    print(
-        "Los costes de 0.5, 1.0 y 1.5 pips "
-        "son escenarios hipotéticos."
-    )
+    short_results = combined_results[
+        combined_results["signal"]
+        ==
+        "SHORT"
+    ]
 
-    print()
 
-    print(
-        "Septiembre no es una validación "
-        "independiente porque ese período "
-        "participó en el proceso de ajuste."
-    )
+    if not long_results.empty:
 
-    print()
+        long_wins = (
+            long_results["result"]
+            ==
+            "WIN"
+        ).sum()
 
-    print(
-        "Este backtest no incluye ejecución real, "
-        "spread variable ni slippage real."
-    )
+
+        print()
+
+        print(
+            f"LONG: "
+            f"{len(long_results)} ops | "
+            f"{(long_wins / len(long_results)) * 100:.2f}% | "
+            f"{long_results['R'].sum():.2f} R"
+        )
+
+
+    if not short_results.empty:
+
+        short_wins = (
+            short_results["result"]
+            ==
+            "WIN"
+        ).sum()
+
+
+        print()
+
+        print(
+            f"SHORT: "
+            f"{len(short_results)} ops | "
+            f"{(short_wins / len(short_results)) * 100:.2f}% | "
+            f"{short_results['R'].sum():.2f} R"
+        )
+
+
+    # ========================================================
+    # RESUMEN DE PERIODOS
+    # ========================================================
+
+    if all_results:
+
+        print()
+
+        print(
+            "========================================"
+        )
+
+        print(
+            "RESUMEN POR PERÍODO"
+        )
+
+        print(
+            "========================================"
+        )
+
+
+        summary = pd.DataFrame(
+            all_results
+        )
+
+
+        print()
+
+        print(
+            summary.to_string(
+                index=False
+            )
+        )
+
+
+# ============================================================
+# FIN
+# ============================================================
+
+print()
+
+print(
+    "========================================"
+)
+
+print(
+    "FIN DE LA AUDITORÍA"
+)
+
+print(
+    "========================================"
+)
