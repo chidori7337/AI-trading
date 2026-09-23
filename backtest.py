@@ -17,7 +17,7 @@ OUTPUT_SIZE = 5000
 # 1. Precio vs EMA20
 # 2. EMA20 vs EMA50
 # 3. EMA50 vs EMA200
-# 4. Estructura de 3 velas
+# 4. Estructura
 SCORE_THRESHOLD = 3
 
 # Gestión de riesgo
@@ -25,8 +25,11 @@ ATR_PERIOD = 14
 SL_ATR = 1.5
 TP_ATR = 3.0
 
-# Nueva estructura
-STRUCTURE_LOOKBACK = 3
+# Estructura de 1 vela
+STRUCTURE_LOOKBACK = 1
+
+# Distancia máxima respecto a EMA20
+MAX_EMA_DISTANCE_ATR = 1.0
 
 
 # ============================================================
@@ -193,7 +196,7 @@ while i < len(df) - 1:
     if current["EMA50"] > current["EMA200"]:
         long_score += 1
 
-    # 4. Estructura alcista de 3 velas
+    # 4. Estructura alcista de 1 vela
     previous_highs = df.iloc[
         i - STRUCTURE_LOOKBACK:i
     ]["High"]
@@ -225,7 +228,7 @@ while i < len(df) - 1:
     if current["EMA50"] < current["EMA200"]:
         short_score += 1
 
-    # 4. Estructura bajista de 3 velas
+    # 4. Estructura bajista de 1 vela
     if (
         current["High"] < previous_highs.min()
         and current["Low"] < previous_lows.max()
@@ -248,6 +251,23 @@ while i < len(df) - 1:
 
     # Sin señal
     if signal is None:
+        i += 1
+        continue
+
+
+    # ========================================================
+    # FILTRO DE DISTANCIA A EMA20
+    # ========================================================
+
+    ema_distance = abs(
+        current["Close"] - current["EMA20"]
+    )
+
+    max_distance = (
+        MAX_EMA_DISTANCE_ATR * current["ATR"]
+    )
+
+    if ema_distance > max_distance:
         i += 1
         continue
 
