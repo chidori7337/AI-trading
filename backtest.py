@@ -1,9 +1,10 @@
 import time
+import os
 import requests
 import pandas as pd
 
 
-API_KEY = "TU_API_KEY"
+API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 
 
 PERIODS = [
