@@ -13,11 +13,11 @@ SYMBOL = "EUR/USD"
 INTERVAL = "5min"
 OUTPUT_SIZE = 5000
 
-# Ahora tenemos 4 condiciones:
-# EMA20
-# EMA50
-# EMA200
-# Estructura
+# 4 condiciones:
+# 1. Precio vs EMA20
+# 2. EMA20 vs EMA50
+# 3. EMA50 vs EMA200
+# 4. Estructura de 3 velas
 SCORE_THRESHOLD = 3
 
 # Gestión de riesgo
@@ -25,8 +25,8 @@ ATR_PERIOD = 14
 SL_ATR = 1.5
 TP_ATR = 3.0
 
-# Estructura de 1 vela
-STRUCTURE_LOOKBACK = 1
+# Nueva estructura
+STRUCTURE_LOOKBACK = 3
 
 
 # ============================================================
@@ -193,10 +193,18 @@ while i < len(df) - 1:
     if current["EMA50"] > current["EMA200"]:
         long_score += 1
 
-    # 4. Estructura alcista
+    # 4. Estructura alcista de 3 velas
+    previous_highs = df.iloc[
+        i - STRUCTURE_LOOKBACK:i
+    ]["High"]
+
+    previous_lows = df.iloc[
+        i - STRUCTURE_LOOKBACK:i
+    ]["Low"]
+
     if (
-        current["High"] > df.iloc[i - 1]["High"]
-        and current["Low"] > df.iloc[i - 1]["Low"]
+        current["High"] > previous_highs.max()
+        and current["Low"] > previous_lows.min()
     ):
         long_score += 1
 
@@ -217,10 +225,10 @@ while i < len(df) - 1:
     if current["EMA50"] < current["EMA200"]:
         short_score += 1
 
-    # 4. Estructura bajista
+    # 4. Estructura bajista de 3 velas
     if (
-        current["High"] < df.iloc[i - 1]["High"]
-        and current["Low"] < df.iloc[i - 1]["Low"]
+        current["High"] < previous_highs.min()
+        and current["Low"] < previous_lows.max()
     ):
         short_score += 1
 
