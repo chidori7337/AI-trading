@@ -13,15 +13,19 @@ SYMBOL = "EUR/USD"
 INTERVAL = "5min"
 OUTPUT_SIZE = 5000
 
-# Estrategia
-SCORE_THRESHOLD = 4
+# Ahora tenemos 4 condiciones:
+# EMA20
+# EMA50
+# EMA200
+# Estructura
+SCORE_THRESHOLD = 3
 
 # Gestión de riesgo
 ATR_PERIOD = 14
 SL_ATR = 1.5
-TP_ATR = 2.5
+TP_ATR = 3.0
 
-# Estructura
+# Estructura de 1 vela
 STRUCTURE_LOOKBACK = 1
 
 
@@ -115,30 +119,6 @@ df["EMA200"] = df["Close"].ewm(
 
 
 # ============================================================
-# RSI
-# ============================================================
-
-delta = df["Close"].diff()
-
-gain = delta.clip(lower=0)
-loss = -delta.clip(upper=0)
-
-avg_gain = gain.ewm(
-    alpha=1 / 14,
-    adjust=False
-).mean()
-
-avg_loss = loss.ewm(
-    alpha=1 / 14,
-    adjust=False
-).mean()
-
-rs = avg_gain / avg_loss
-
-df["RSI"] = 100 - (100 / (1 + rs))
-
-
-# ============================================================
 # ATR
 # ============================================================
 
@@ -168,7 +148,6 @@ df.dropna(
         "EMA20",
         "EMA50",
         "EMA200",
-        "RSI",
         "ATR"
     ],
     inplace=True
@@ -214,11 +193,7 @@ while i < len(df) - 1:
     if current["EMA50"] > current["EMA200"]:
         long_score += 1
 
-    # 4. RSI alcista
-    if current["RSI"] > 52:
-        long_score += 1
-
-    # 5. Estructura alcista
+    # 4. Estructura alcista
     if (
         current["High"] > df.iloc[i - 1]["High"]
         and current["Low"] > df.iloc[i - 1]["Low"]
@@ -242,11 +217,7 @@ while i < len(df) - 1:
     if current["EMA50"] < current["EMA200"]:
         short_score += 1
 
-    # 4. RSI bajista
-    if current["RSI"] < 48:
-        short_score += 1
-
-    # 5. Estructura bajista
+    # 4. Estructura bajista
     if (
         current["High"] < df.iloc[i - 1]["High"]
         and current["Low"] < df.iloc[i - 1]["Low"]
@@ -328,8 +299,6 @@ while i < len(df) - 1:
             hit_stop = low <= stop
             hit_target = high >= target
 
-            # Si toca ambos en la misma vela,
-            # asumimos primero el SL.
             if hit_stop:
                 result = "LOSS"
                 result_r = -1
@@ -338,7 +307,7 @@ while i < len(df) - 1:
 
             if hit_target:
                 result = "WIN"
-                result_r = TP_ATR / SL_ATR
+                result_r = 2
                 exit_index = j
                 break
 
@@ -352,8 +321,6 @@ while i < len(df) - 1:
             hit_stop = high >= stop
             hit_target = low <= target
 
-            # Si toca ambos en la misma vela,
-            # asumimos primero el SL.
             if hit_stop:
                 result = "LOSS"
                 result_r = -1
@@ -362,7 +329,7 @@ while i < len(df) - 1:
 
             if hit_target:
                 result = "WIN"
-                result_r = TP_ATR / SL_ATR
+                result_r = 2
                 exit_index = j
                 break
 
