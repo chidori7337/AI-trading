@@ -281,10 +281,7 @@ def run_backtest(df):
         # NUEVO FILTRO
         # Cuerpo >= 0.5 ATR
         # -----------------------------------
-        if body < 0.5 * atr:
-            weak_confirmations += 1
-            i += 1
-            continue
+       
 
         strong_confirmations += 1
 
