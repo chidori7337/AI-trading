@@ -17,7 +17,7 @@ OUTPUT_SIZE = 5000
 # 1. Precio vs EMA20
 # 2. EMA20 vs EMA50
 # 3. EMA50 vs EMA200
-# 4. Estructura
+# 4. Estructura de 1 vela
 SCORE_THRESHOLD = 3
 
 # Gestión de riesgo
@@ -25,8 +25,13 @@ ATR_PERIOD = 14
 SL_ATR = 1.5
 TP_ATR = 3.0
 
-# Estructura de 2 velas
-STRUCTURE_LOOKBACK = 2
+# Estructura de 1 vela
+STRUCTURE_LOOKBACK = 1
+
+# RSI como filtro de contexto
+RSI_PERIOD = 14
+RSI_LONG_MIN = 45
+RSI_SHORT_MAX = 55
 
 
 # ============================================================
@@ -56,7 +61,6 @@ data = response.json()
 
 if "values" not in data:
     raise ValueError(f"Error descargando datos: {data}")
-
 
 df = pd.DataFrame(data["values"])
 
@@ -140,6 +144,32 @@ df["ATR"] = true_range.ewm(
 
 
 # ============================================================
+# RSI
+# ============================================================
+
+delta = df["Close"].diff()
+
+gain = delta.clip(lower=0)
+loss = -delta.clip(upper=0)
+
+average_gain = gain.ewm(
+    alpha=1 / RSI_PERIOD,
+    adjust=False
+).mean()
+
+average_loss = loss.ewm(
+    alpha=1 / RSI_PERIOD,
+    adjust=False
+).mean()
+
+rs = average_gain / average_loss
+
+df["RSI"] = 100 - (
+    100 / (1 + rs)
+)
+
+
+# ============================================================
 # ELIMINAR FILAS SIN INDICADORES
 # ============================================================
 
@@ -148,7 +178,8 @@ df.dropna(
         "EMA20",
         "EMA50",
         "EMA200",
-        "ATR"
+        "ATR",
+        "RSI"
     ],
     inplace=True
 )
@@ -206,7 +237,7 @@ while i < len(df) - 1:
     if current["EMA50"] > current["EMA200"]:
         long_score += 1
 
-    # 4. Estructura alcista de 2 velas
+    # 4. Estructura alcista
     if (
         current["High"] > previous_highs.max()
         and current["Low"] > previous_lows.min()
@@ -230,7 +261,7 @@ while i < len(df) - 1:
     if current["EMA50"] < current["EMA200"]:
         short_score += 1
 
-    # 4. Estructura bajista de 2 velas
+    # 4. Estructura bajista
     if (
         current["High"] < previous_highs.min()
         and current["Low"] < previous_lows.max()
@@ -255,6 +286,23 @@ while i < len(df) - 1:
     if signal is None:
         i += 1
         continue
+
+
+    # ========================================================
+    # FILTRO RSI
+    # ========================================================
+
+    if signal == "LONG":
+
+        if current["RSI"] <= RSI_LONG_MIN:
+            i += 1
+            continue
+
+    else:
+
+        if current["RSI"] >= RSI_SHORT_MAX:
+            i += 1
+            continue
 
 
     # ========================================================
@@ -369,6 +417,7 @@ while i < len(df) - 1:
             "entry": entry,
             "stop": stop,
             "target": target,
+            "RSI": current["RSI"],
             "result": result,
             "R": result_r
         }
@@ -447,6 +496,7 @@ else:
                 "datetime",
                 "signal",
                 "entry",
+                "RSI",
                 "result",
                 "R"
             ]
