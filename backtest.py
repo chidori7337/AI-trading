@@ -20,6 +20,12 @@ PERIODS = [
 ]
 
 
+FILTERS = {
+    "SIN FILTRO": 0.0,
+    "0.5 ATR": 0.5,
+}
+
+
 def download_data(end_date):
     url = "https://api.twelvedata.com/time_series"
 
@@ -34,19 +40,39 @@ def download_data(end_date):
     max_retries = 5
 
     for attempt in range(max_retries):
+
         try:
-            response = requests.get(url, params=params, timeout=30)
+            response = requests.get(
+                url,
+                params=params,
+                timeout=30
+            )
+
             data = response.json()
 
             if "values" not in data:
-                message = data.get("message", "Error desconocido")
-                print(f"Error Twelve Data: {message}")
 
-                if response.status_code == 429 or "limit" in message.lower():
+                message = data.get(
+                    "message",
+                    "Error desconocido"
+                )
+
+                print(
+                    f"Error Twelve Data: {message}"
+                )
+
+                if (
+                    response.status_code == 429
+                    or "limit" in message.lower()
+                ):
+
                     wait_time = 20 * (attempt + 1)
+
                     print(
-                        f"Rate limit. Esperando {wait_time} segundos..."
+                        f"Rate limit. "
+                        f"Esperando {wait_time} segundos..."
                     )
+
                     time.sleep(wait_time)
                     continue
 
@@ -54,7 +80,9 @@ def download_data(end_date):
 
             df = pd.DataFrame(data["values"])
 
-            df["datetime"] = pd.to_datetime(df["datetime"])
+            df["datetime"] = pd.to_datetime(
+                df["datetime"]
+            )
 
             numeric_cols = [
                 "open",
@@ -64,9 +92,14 @@ def download_data(end_date):
             ]
 
             for col in numeric_cols:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+                df[col] = pd.to_numeric(
+                    df[col],
+                    errors="coerce"
+                )
 
-            df = df.sort_values("datetime").reset_index(drop=True)
+            df = df.sort_values(
+                "datetime"
+            ).reset_index(drop=True)
 
             df.rename(
                 columns={
@@ -81,90 +114,138 @@ def download_data(end_date):
             return df
 
         except Exception as e:
-            print(f"Error descargando datos: {e}")
+
+            print(
+                f"Error descargando datos: {e}"
+            )
 
             if attempt < max_retries - 1:
+
                 wait_time = 10 * (attempt + 1)
-                print(f"Esperando {wait_time} segundos...")
+
+                print(
+                    f"Esperando {wait_time} segundos..."
+                )
+
                 time.sleep(wait_time)
 
     return None
 
 
 def calculate_indicators(df):
+
     df = df.copy()
 
-    # EMA
-    df["EMA20"] = df["Close"].ewm(
-        span=20,
-        adjust=False
-    ).mean()
+    # EMA 20
+    df["EMA20"] = (
+        df["Close"]
+        .ewm(
+            span=20,
+            adjust=False
+        )
+        .mean()
+    )
 
-    df["EMA50"] = df["Close"].ewm(
-        span=50,
-        adjust=False
-    ).mean()
+    # EMA 50
+    df["EMA50"] = (
+        df["Close"]
+        .ewm(
+            span=50,
+            adjust=False
+        )
+        .mean()
+    )
 
-    df["EMA200"] = df["Close"].ewm(
-        span=200,
-        adjust=False
-    ).mean()
+    # EMA 200
+    df["EMA200"] = (
+        df["Close"]
+        .ewm(
+            span=200,
+            adjust=False
+        )
+        .mean()
+    )
 
-    # ATR 14
-    df["PrevClose"] = df["Close"].shift(1)
+    # ATR
+    df["PrevClose"] = (
+        df["Close"].shift(1)
+    )
 
     df["TR"] = df.apply(
         lambda row: max(
             row["High"] - row["Low"],
-            abs(row["High"] - row["PrevClose"])
-            if pd.notna(row["PrevClose"])
+
+            abs(
+                row["High"]
+                - row["PrevClose"]
+            )
+            if pd.notna(
+                row["PrevClose"]
+            )
             else 0,
-            abs(row["Low"] - row["PrevClose"])
-            if pd.notna(row["PrevClose"])
+
+            abs(
+                row["Low"]
+                - row["PrevClose"]
+            )
+            if pd.notna(
+                row["PrevClose"]
+            )
             else 0,
         ),
         axis=1,
     )
 
-    df["ATR"] = df["TR"].rolling(14).mean()
+    df["ATR"] = (
+        df["TR"]
+        .rolling(14)
+        .mean()
+    )
 
-    # Cuerpo de vela
-    df["Body"] = abs(df["Close"] - df["Open"])
+    # Cuerpo de la vela
+    df["Body"] = abs(
+        df["Close"]
+        - df["Open"]
+    )
 
     return df
 
 
 def get_original_signal(df, index):
+
     current = df.iloc[index]
 
-    if pd.isna(current["EMA200"]) or pd.isna(current["ATR"]):
+    if (
+        pd.isna(current["EMA200"])
+        or pd.isna(current["ATR"])
+    ):
         return None
 
     long_score = 0
     short_score = 0
 
-    # 1. Precio respecto a EMA20
+    # 1. Precio vs EMA20
     if current["Close"] > current["EMA20"]:
         long_score += 1
 
     if current["Close"] < current["EMA20"]:
         short_score += 1
 
-    # 2. EMA20 respecto a EMA50
+    # 2. EMA20 vs EMA50
     if current["EMA20"] > current["EMA50"]:
         long_score += 1
 
     if current["EMA20"] < current["EMA50"]:
         short_score += 1
 
-    # 3. EMA50 respecto a EMA200
+    # 3. EMA50 vs EMA200
     if current["EMA50"] > current["EMA200"]:
         long_score += 1
 
     if current["EMA50"] < current["EMA200"]:
         short_score += 1
 
-    # 4. Estructura de una vela
+    # 4. Estructura de 1 vela
     if current["Close"] > current["Open"]:
         long_score += 1
 
@@ -180,37 +261,122 @@ def get_original_signal(df, index):
     return None
 
 
+def generate_candidate_signals(df):
+
+    candidates = []
+
+    i = 200
+
+    while i < len(df) - 2:
+
+        original_signal = get_original_signal(
+            df,
+            i
+        )
+
+        if original_signal is None:
+            i += 1
+            continue
+
+        confirmation_signal = (
+            get_original_signal(
+                df,
+                i + 1
+            )
+        )
+
+        if (
+            confirmation_signal
+            != original_signal
+        ):
+            i += 1
+            continue
+
+        confirmation_candle = df.iloc[i + 1]
+
+        body = confirmation_candle["Body"]
+        atr = confirmation_candle["ATR"]
+
+        if (
+            pd.isna(body)
+            or pd.isna(atr)
+            or atr <= 0
+        ):
+            i += 1
+            continue
+
+        candidates.append(
+            {
+                "signal_index": i,
+                "entry_index": i + 1,
+                "original_signal":
+                    original_signal,
+                "body": body,
+                "atr": atr,
+                "body_atr_ratio":
+                    body / atr,
+            }
+        )
+
+        i += 1
+
+    return candidates
+
+
 def calculate_max_drawdown(results):
+
     equity = 0
     peak = 0
     max_drawdown = 0
 
     for r in results:
+
         equity += r
-        peak = max(peak, equity)
+
+        if equity > peak:
+            peak = equity
+
         drawdown = equity - peak
-        max_drawdown = min(max_drawdown, drawdown)
+
+        if drawdown < max_drawdown:
+            max_drawdown = drawdown
 
     return max_drawdown
 
 
 def calculate_max_losing_streak(results):
-    current_streak = 0
-    max_streak = 0
+
+    current = 0
+    maximum = 0
 
     for r in results:
-        if r < 0:
-            current_streak += 1
-            max_streak = max(max_streak, current_streak)
-        else:
-            current_streak = 0
 
-    return max_streak
+        if r < 0:
+
+            current += 1
+
+            if current > maximum:
+                maximum = current
+
+        else:
+            current = 0
+
+    return maximum
 
 
 def calculate_profit_factor(results):
-    gross_profit = sum(r for r in results if r > 0)
-    gross_loss = abs(sum(r for r in results if r < 0))
+
+    gross_profit = sum(
+        r for r in results
+        if r > 0
+    )
+
+    gross_loss = abs(
+        sum(
+            r for r in results
+            if r < 0
+        )
+    )
 
     if gross_loss == 0:
         return float("inf")
@@ -219,106 +385,107 @@ def calculate_profit_factor(results):
 
 
 def duration_bucket(minutes):
+
     if minutes < 30:
         return "< 30 min"
-    elif minutes < 60:
+
+    if minutes < 60:
         return "30-60 min"
-    elif minutes < 120:
+
+    if minutes < 120:
         return "60-120 min"
-    elif minutes < 180:
+
+    if minutes < 180:
         return "120-180 min"
-    elif minutes < 360:
+
+    if minutes < 360:
         return "180-360 min"
-    else:
-        return "> 360 min"
+
+    return "> 360 min"
 
 
-def run_backtest(df):
+def simulate_filter(
+    df,
+    candidates,
+    threshold
+):
+
     trades = []
 
-    raw_candidates = 0
-    confirmation_candidates = 0
-    strong_confirmations = 0
-    weak_confirmations = 0
+    skipped_by_filter = 0
 
-    i = 200
+    next_available_index = 0
 
-    while i < len(df) - 2:
+    for candidate in candidates:
 
-        # -----------------------------------
-        # VELA A: señal original
-        # -----------------------------------
-        original_signal = get_original_signal(df, i)
+        entry_index = candidate[
+            "entry_index"
+        ]
 
-        if original_signal is None:
-            i += 1
+        # No podemos abrir otra operación
+        # mientras haya una anterior abierta.
+        if entry_index < next_available_index:
             continue
 
-        raw_candidates += 1
+        body_atr_ratio = candidate[
+            "body_atr_ratio"
+        ]
 
-        # -----------------------------------
-        # VELA B: confirmación
-        # -----------------------------------
-        confirmation_signal = get_original_signal(df, i + 1)
+        # Filtro
+        if body_atr_ratio < threshold:
 
-        if confirmation_signal != original_signal:
-            i += 1
+            skipped_by_filter += 1
+
             continue
 
-        confirmation_candidates += 1
+        original_signal = candidate[
+            "original_signal"
+        ]
 
-        confirmation_candle = df.iloc[i + 1]
-
-        body = confirmation_candle["Body"]
-        atr = confirmation_candle["ATR"]
-
-        # Seguridad por datos incompletos
-        if pd.isna(body) or pd.isna(atr) or atr <= 0:
-            i += 1
-            continue
-
-        # -----------------------------------
-        # NUEVO FILTRO
-        # Cuerpo >= 0.5 ATR
-        # -----------------------------------
-       
-
-        strong_confirmations += 1
-
-        # -----------------------------------
-        # INVERTIMOS LA SEÑAL
-        # -----------------------------------
+        # Inversión de señal
         if original_signal == "LONG":
             signal = "SHORT"
         else:
             signal = "LONG"
 
-        entry_index = i + 1
         current = df.iloc[entry_index]
 
         entry = current["Close"]
         atr = current["ATR"]
 
-        if pd.isna(atr) or atr <= 0:
-            i += 1
+        if (
+            pd.isna(atr)
+            or atr <= 0
+        ):
             continue
 
-        # -----------------------------------
         # SL / TP
-        # -----------------------------------
         risk_distance = 1.5 * atr
 
         if signal == "LONG":
-            stop = entry - risk_distance
-            target = entry + 3 * atr
+
+            stop = (
+                entry
+                - risk_distance
+            )
+
+            target = (
+                entry
+                + 3 * atr
+            )
 
         else:
-            stop = entry + risk_distance
-            target = entry - 3 * atr
 
-        # -----------------------------------
-        # BUSCAR SALIDA
-        # -----------------------------------
+            stop = (
+                entry
+                + risk_distance
+            )
+
+            target = (
+                entry
+                - 3 * atr
+            )
+
         result = None
         R = None
         exit_index = None
@@ -331,41 +498,62 @@ def run_backtest(df):
 
             if signal == "LONG":
 
-                hit_stop = future["Low"] <= stop
-                hit_target = future["High"] >= target
+                hit_stop = (
+                    future["Low"]
+                    <= stop
+                )
+
+                hit_target = (
+                    future["High"]
+                    >= target
+                )
 
             else:
 
-                hit_stop = future["High"] >= stop
-                hit_target = future["Low"] <= target
+                hit_stop = (
+                    future["High"]
+                    >= stop
+                )
 
-            # Conservador:
-            # si toca ambos en la misma vela,
-            # contamos pérdida.
+                hit_target = (
+                    future["Low"]
+                    <= target
+                )
+
+            # Conservador: si toca ambos
+            # en la misma vela, contamos LOSS.
             if hit_stop:
+
                 result = "LOSS"
                 R = -1
                 exit_index = j
+
                 break
 
             if hit_target:
+
                 result = "WIN"
                 R = 2
                 exit_index = j
+
                 break
 
             j += 1
 
-        # Si no hubo salida, terminamos
-        # el backtest del período.
         if result is None:
-            break
+            continue
 
         entry_time = current["datetime"]
-        exit_time = df.iloc[exit_index]["datetime"]
+
+        exit_time = (
+            df.iloc[
+                exit_index
+            ]["datetime"]
+        )
 
         duration = (
-            exit_time - entry_time
+            exit_time
+            - entry_time
         ).total_seconds() / 60
 
         trades.append(
@@ -374,228 +562,125 @@ def run_backtest(df):
                 "result": result,
                 "R": R,
                 "duration": duration,
-                "bucket": duration_bucket(duration),
+                "bucket":
+                    duration_bucket(
+                        duration
+                    ),
+                "body_atr_ratio":
+                    body_atr_ratio,
             }
         )
 
-        # Solo una operación abierta a la vez
-        i = exit_index + 1
+        # La siguiente entrada solo puede
+        # ocurrir después de la salida.
+        next_available_index = (
+            exit_index + 1
+        )
 
-    # -----------------------------------
-    # MÉTRICAS
-    # -----------------------------------
-    results = [trade["R"] for trade in trades]
+    results = [
+        trade["R"]
+        for trade in trades
+    ]
 
     total_ops = len(trades)
-    wins = sum(1 for r in results if r > 0)
-    losses = sum(1 for r in results if r < 0)
 
-    if total_ops > 0:
-        win_rate = wins / total_ops * 100
-        avg_r = sum(results) / total_ops
-        avg_duration = sum(
-            t["duration"] for t in trades
-        ) / total_ops
-
-        sorted_durations = sorted(
-            t["duration"] for t in trades
-        )
-
-        median_duration = sorted_durations[
-            len(sorted_durations) // 2
-        ]
-
-    else:
-        win_rate = 0
-        avg_r = 0
-        avg_duration = 0
-        median_duration = 0
-
-    total_r = sum(results)
-
-    max_dd = calculate_max_drawdown(results)
-    losing_streak = calculate_max_losing_streak(results)
-    profit_factor = calculate_profit_factor(results)
-
-    # -----------------------------------
-    # DURACIONES
-    # -----------------------------------
-    buckets = [
-        "< 30 min",
-        "30-60 min",
-        "60-120 min",
-        "120-180 min",
-        "180-360 min",
-        "> 360 min",
-    ]
-
-    duration_stats = {}
-
-    for bucket in buckets:
-
-        bucket_trades = [
-            t for t in trades
-            if t["bucket"] == bucket
-        ]
-
-        bucket_results = [
-            t["R"] for t in bucket_trades
-        ]
-
-        count = len(bucket_trades)
-        bucket_wins = sum(
-            1 for r in bucket_results if r > 0
-        )
-
-        if count > 0:
-            bucket_win_rate = (
-                bucket_wins / count * 100
-            )
-
-            bucket_total_r = sum(bucket_results)
-
-            bucket_avg_r = (
-                bucket_total_r / count
-            )
-
-            percentage = (
-                count / total_ops * 100
-                if total_ops > 0
-                else 0
-            )
-
-        else:
-            bucket_win_rate = 0
-            bucket_total_r = 0
-            bucket_avg_r = 0
-            percentage = 0
-
-        duration_stats[bucket] = {
-            "operations": count,
-            "percentage": percentage,
-            "win_rate": bucket_win_rate,
-            "R_total": bucket_total_r,
-            "R_avg": bucket_avg_r,
-        }
-
-    # -----------------------------------
-    # LONG / SHORT
-    # -----------------------------------
-    long_trades = [
-        t for t in trades
-        if t["signal"] == "LONG"
-    ]
-
-    short_trades = [
-        t for t in trades
-        if t["signal"] == "SHORT"
-    ]
-
-    long_results = [t["R"] for t in long_trades]
-    short_results = [t["R"] for t in short_trades]
-
-    long_wins = sum(
-        1 for r in long_results if r > 0
+    wins = sum(
+        1 for r in results
+        if r > 0
     )
 
-    short_wins = sum(
-        1 for r in short_results if r > 0
+    losses = sum(
+        1 for r in results
+        if r < 0
     )
 
-    long_win_rate = (
-        long_wins / len(long_results) * 100
-        if long_results
+    win_rate = (
+        wins / total_ops * 100
+        if total_ops > 0
         else 0
     )
 
-    short_win_rate = (
-        short_wins / len(short_results) * 100
-        if short_results
+    total_r = sum(results)
+
+    avg_r = (
+        total_r / total_ops
+        if total_ops > 0
+        else 0
+    )
+
+    max_dd = calculate_max_drawdown(
+        results
+    )
+
+    losing_streak = (
+        calculate_max_losing_streak(
+            results
+        )
+    )
+
+    profit_factor = (
+        calculate_profit_factor(
+            results
+        )
+    )
+
+    durations = [
+        trade["duration"]
+        for trade in trades
+    ]
+
+    avg_duration = (
+        sum(durations)
+        / len(durations)
+        if durations
+        else 0
+    )
+
+    sorted_durations = sorted(
+        durations
+    )
+
+    median_duration = (
+        sorted_durations[
+            len(sorted_durations) // 2
+        ]
+        if sorted_durations
         else 0
     )
 
     return {
         "trades": trades,
-        "raw_candidates": raw_candidates,
-        "confirmation_candidates": confirmation_candidates,
-        "strong_confirmations": strong_confirmations,
-        "weak_confirmations": weak_confirmations,
-        "total_ops": total_ops,
+        "operations": total_ops,
         "wins": wins,
         "losses": losses,
         "win_rate": win_rate,
-        "total_r": total_r,
-        "avg_r": avg_r,
-        "max_dd": max_dd,
+        "R": total_r,
+        "avg_R": avg_r,
+        "drawdown": max_dd,
         "losing_streak": losing_streak,
-        "profit_factor": profit_factor,
-        "avg_duration": avg_duration,
-        "median_duration": median_duration,
-        "duration_stats": duration_stats,
-        "long_ops": len(long_results),
-        "long_win_rate": long_win_rate,
-        "long_r": sum(long_results),
-        "short_ops": len(short_results),
-        "short_win_rate": short_win_rate,
-        "short_r": sum(short_results),
+        "profit_factor":
+            profit_factor,
+        "avg_duration":
+            avg_duration,
+        "median_duration":
+            median_duration,
+        "skipped_by_filter":
+            skipped_by_filter,
     }
 
 
-def print_results(period_name, result):
+def print_test_result(
+    name,
+    result,
+    total_candidates
+):
 
-    print("\n=========================")
-    print("RESULTADOS")
-    print("=========================")
-
-    print(
-        f"\nCANDIDATAS ORIGINALES: "
-        f"{result['raw_candidates']}"
-    )
+    print(f"\n{name}")
+    print("-" * 35)
 
     print(
-        f"SEÑALES CONFIRMADAS: "
-        f"{result['confirmation_candidates']}"
-    )
-
-    confirmation_rate = (
-        result["confirmation_candidates"]
-        / result["raw_candidates"]
-        * 100
-        if result["raw_candidates"] > 0
-        else 0
-    )
-
-    print(
-        f"TASA DE CONFIRMACIÓN: "
-        f"{confirmation_rate:.2f}%"
-    )
-
-    print(
-        f"\nCONFIRMACIONES FUERTES: "
-        f"{result['strong_confirmations']}"
-    )
-
-    print(
-        f"CONFIRMACIONES DÉBILES DESCARTADAS: "
-        f"{result['weak_confirmations']}"
-    )
-
-    strong_rate = (
-        result["strong_confirmations"]
-        / result["confirmation_candidates"]
-        * 100
-        if result["confirmation_candidates"] > 0
-        else 0
-    )
-
-    print(
-        f"TASA DE CONFIRMACIÓN FUERTE: "
-        f"{strong_rate:.2f}%"
-    )
-
-    print(
-        f"\nOPERACIONES: "
-        f"{result['total_ops']}"
+        f"OPERACIONES: "
+        f"{result['operations']}"
     )
 
     print(
@@ -614,18 +699,18 @@ def print_results(period_name, result):
     )
 
     print(
-        f"RESULTADO: "
-        f"{result['total_r']:.2f} R"
+        f"R TOTAL: "
+        f"{result['R']:.2f}"
     )
 
     print(
-        f"PROMEDIO: "
-        f"{result['avg_r']:.3f} R"
+        f"R MEDIO: "
+        f"{result['avg_R']:.3f}"
     )
 
     print(
         f"DRAWDOWN MÁXIMO: "
-        f"{result['max_dd']:.2f} R"
+        f"{result['drawdown']:.2f} R"
     )
 
     print(
@@ -633,8 +718,13 @@ def print_results(period_name, result):
         f"{result['losing_streak']}"
     )
 
-    if result["profit_factor"] == float("inf"):
-        print("PROFIT FACTOR: inf")
+    if (
+        result["profit_factor"]
+        == float("inf")
+    ):
+        print(
+            "PROFIT FACTOR: inf"
+        )
     else:
         print(
             f"PROFIT FACTOR: "
@@ -651,57 +741,36 @@ def print_results(period_name, result):
         f"{result['median_duration']:.1f} min"
     )
 
-    print("\n========================================")
-    print("RESULTADOS POR DURACIÓN")
-    print("========================================")
+    if total_candidates > 0:
 
-    for bucket, stats in result["duration_stats"].items():
-
-        print(f"\n{bucket}")
-        print(
-            f"  Operaciones: "
-            f"{stats['operations']}"
-        )
-        print(
-            f"  Porcentaje: "
-            f"{stats['percentage']:.2f}%"
-        )
-        print(
-            f"  Win rate: "
-            f"{stats['win_rate']:.2f}%"
-        )
-        print(
-            f"  R total: "
-            f"{stats['R_total']:.2f}"
-        )
-        print(
-            f"  R medio: "
-            f"{stats['R_avg']:.3f}"
+        skipped_percentage = (
+            result["skipped_by_filter"]
+            / total_candidates
+            * 100
         )
 
-    print("\n========================================")
-    print("LONG / SHORT")
-    print("========================================")
+    else:
+        skipped_percentage = 0
 
     print(
-        f"\nLONG: "
-        f"{result['long_ops']} ops | "
-        f"{result['long_win_rate']:.2f}% | "
-        f"{result['long_r']:.2f} R"
+        f"DESCARTADAS POR FILTRO: "
+        f"{result['skipped_by_filter']}"
     )
 
     print(
-        f"SHORT: "
-        f"{result['short_ops']} ops | "
-        f"{result['short_win_rate']:.2f}% | "
-        f"{result['short_r']:.2f} R"
+        f"% CANDIDATAS DESCARTADAS: "
+        f"{skipped_percentage:.2f}%"
     )
 
 
 def main():
 
-    all_trades = []
-    summary_rows = []
+    combined = {
+        name: []
+        for name in FILTERS
+    }
+
+    period_results = []
 
     for period_name, end_date in PERIODS:
 
@@ -713,7 +782,12 @@ def main():
         df = download_data(end_date)
 
         if df is None or df.empty:
-            print("No se pudieron descargar los datos.")
+
+            print(
+                "No se pudieron descargar "
+                "los datos."
+            )
+
             continue
 
         print(
@@ -722,364 +796,454 @@ def main():
         )
 
         print(
-            f"\nVELAS OBTENIDAS: "
+            f"VELAS OBTENIDAS: "
             f"{len(df)}"
         )
 
         print(
-            f"\nDESDE: "
+            f"DESDE: "
             f"{df['datetime'].iloc[0]}"
         )
 
         print(
-            f"\nHASTA: "
+            f"HASTA: "
             f"{df['datetime'].iloc[-1]}"
         )
 
         df = calculate_indicators(df)
 
         print(
-            "\nINDICADORES CALCULADOS CORRECTAMENTE"
+            "\nINDICADORES CALCULADOS "
+            "CORRECTAMENTE"
         )
 
-        result = run_backtest(df)
+        # ==================================
+        # GENERAMOS LAS CANDIDATAS UNA SOLA VEZ
+        # ==================================
 
-        print_results(period_name, result)
-
-        all_trades.extend(result["trades"])
-
-        confirmation_rate = (
-            result["confirmation_candidates"]
-            / result["raw_candidates"]
-            * 100
-            if result["raw_candidates"] > 0
-            else 0
+        candidates = generate_candidate_signals(
+            df
         )
 
-        summary_rows.append(
+        total_candidates = len(candidates)
+
+        print(
+            f"\nCANDIDATAS ORIGINALES: "
+            f"{total_candidates}"
+        )
+
+        print(
+            "\nLas dos pruebas usan "
+            "exactamente estas mismas candidatas."
+        )
+
+        results_for_period = {}
+
+        # ==================================
+        # A/B
+        # ==================================
+
+        for name, threshold in FILTERS.items():
+
+            result = simulate_filter(
+                df,
+                candidates,
+                threshold
+            )
+
+            results_for_period[name] = result
+
+            combined[name].extend(
+                result["trades"]
+            )
+
+            print_test_result(
+                name,
+                result,
+                total_candidates
+            )
+
+        # ==================================
+        # COMPARACIÓN DIRECTA
+        # ==================================
+
+        a = results_for_period[
+            "SIN FILTRO"
+        ]
+
+        b = results_for_period[
+            "0.5 ATR"
+        ]
+
+        print("\n")
+        print("=" * 40)
+        print("CAMBIO DEL FILTRO 0.5 ATR")
+        print("=" * 40)
+
+        print(
+            f"\nCAMBIO OPERACIONES: "
+            f"{b['operations'] - a['operations']:+d}"
+        )
+
+        print(
+            f"CAMBIO WIN RATE: "
+            f"{b['win_rate'] - a['win_rate']:+.2f} puntos"
+        )
+
+        print(
+            f"CAMBIO R: "
+            f"{b['R'] - a['R']:+.2f}"
+        )
+
+        print(
+            f"CAMBIO R MEDIO: "
+            f"{b['avg_R'] - a['avg_R']:+.3f}"
+        )
+
+        print(
+            f"CAMBIO DRAWDOWN: "
+            f"{b['drawdown'] - a['drawdown']:+.2f} R"
+        )
+
+        print(
+            f"CAMBIO RACHA: "
+            f"{b['losing_streak'] - a['losing_streak']:+d}"
+        )
+
+        print(
+            f"CAMBIO PROFIT FACTOR: "
+            f"{b['profit_factor'] - a['profit_factor']:+.3f}"
+        )
+
+        period_results.append(
             {
                 "periodo": period_name,
-                "candidatas": result["raw_candidates"],
-                "confirmadas": result[
-                    "confirmation_candidates"
-                ],
-                "tasa_confirmacion":
-                    confirmation_rate,
-                "confirmaciones_fuertes":
-                    result["strong_confirmations"],
-                "confirmaciones_debiles":
-                    result["weak_confirmations"],
-                "operaciones":
-                    result["total_ops"],
-                "ganadoras":
-                    result["wins"],
-                "perdedoras":
-                    result["losses"],
-                "win_rate":
-                    result["win_rate"],
-                "R":
-                    result["total_r"],
-                "R_promedio":
-                    result["avg_r"],
-                "drawdown":
-                    result["max_dd"],
-                "racha_max":
-                    result["losing_streak"],
-                "profit_factor":
-                    result["profit_factor"],
-                "duracion_media":
-                    result["avg_duration"],
+
+                "candidatas":
+                    total_candidates,
+
+                "ops_sin_filtro":
+                    a["operations"],
+
+                "R_sin_filtro":
+                    a["R"],
+
+                "DD_sin_filtro":
+                    a["drawdown"],
+
+                "ops_0_5":
+                    b["operations"],
+
+                "R_0_5":
+                    b["R"],
+
+                "DD_0_5":
+                    b["drawdown"],
+
+                "cambio_R":
+                    b["R"] - a["R"],
             }
         )
 
         print(
-            "\nEsperando 20 segundos antes "
-            "del siguiente período..."
+            "\nEsperando 20 segundos..."
         )
 
         time.sleep(20)
 
-    # ========================================
+    # ==================================
     # AUDITORÍA COMBINADA
-    # ========================================
+    # ==================================
 
     print("\n")
-    print("=" * 40)
-    print("AUDITORÍA COMBINADA")
-    print("=" * 40)
+    print("=" * 50)
+    print("AUDITORÍA COMBINADA A/B")
+    print("=" * 50)
 
-    combined_results = [
-        trade["R"]
-        for trade in all_trades
-    ]
+    combined_results = {}
 
-    total_ops = len(combined_results)
+    for name, trades in combined.items():
 
-    wins = sum(
-        1 for r in combined_results
-        if r > 0
-    )
-
-    losses = sum(
-        1 for r in combined_results
-        if r < 0
-    )
-
-    total_r = sum(combined_results)
-
-    avg_r = (
-        total_r / total_ops
-        if total_ops > 0
-        else 0
-    )
-
-    win_rate = (
-        wins / total_ops * 100
-        if total_ops > 0
-        else 0
-    )
-
-    max_dd = calculate_max_drawdown(
-        combined_results
-    )
-
-    losing_streak = calculate_max_losing_streak(
-        combined_results
-    )
-
-    profit_factor = calculate_profit_factor(
-        combined_results
-    )
-
-    durations = [
-        trade["duration"]
-        for trade in all_trades
-    ]
-
-    avg_duration = (
-        sum(durations) / len(durations)
-        if durations
-        else 0
-    )
-
-    sorted_durations = sorted(durations)
-
-    median_duration = (
-        sorted_durations[len(sorted_durations) // 2]
-        if sorted_durations
-        else 0
-    )
-
-    print(
-        f"\nOPERACIONES: {total_ops}"
-    )
-
-    print(
-        f"\nGANADORAS: {wins}"
-    )
-
-    print(
-        f"\nPERDEDORAS: {losses}"
-    )
-
-    print(
-        f"\nWIN RATE: {win_rate:.2f}%"
-    )
-
-    print(
-        f"\nR TOTAL: {total_r:.2f}"
-    )
-
-    print(
-        f"\nR MEDIO: {avg_r:.3f}"
-    )
-
-    print(
-        f"\nDRAWDOWN MÁXIMO: {max_dd:.2f} R"
-    )
-
-    print(
-        f"\nPEOR RACHA: {losing_streak}"
-    )
-
-    if profit_factor == float("inf"):
-        print("\nPROFIT FACTOR: inf")
-    else:
-        print(
-            f"\nPROFIT FACTOR: "
-            f"{profit_factor:.3f}"
-        )
-
-    print(
-        f"\nDURACIÓN MEDIA: "
-        f"{avg_duration:.1f} min"
-    )
-
-    print(
-        f"\nDURACIÓN MEDIANA: "
-        f"{median_duration:.1f} min"
-    )
-
-    # ========================================
-    # DURACIÓN COMBINADA
-    # ========================================
-
-    print("\n")
-    print("=" * 40)
-    print("RESULTADOS POR DURACIÓN")
-    print("=" * 40)
-
-    buckets = [
-        "< 30 min",
-        "30-60 min",
-        "60-120 min",
-        "120-180 min",
-        "180-360 min",
-        "> 360 min",
-    ]
-
-    for bucket in buckets:
-
-        bucket_trades = [
-            t for t in all_trades
-            if t["bucket"] == bucket
+        results = [
+            trade["R"]
+            for trade in trades
         ]
 
-        bucket_results = [
-            t["R"] for t in bucket_trades
-        ]
+        total_ops = len(results)
 
-        count = len(bucket_trades)
-
-        bucket_wins = sum(
-            1 for r in bucket_results
+        wins = sum(
+            1 for r in results
             if r > 0
         )
 
-        bucket_win_rate = (
-            bucket_wins / count * 100
-            if count > 0
-            else 0
+        losses = sum(
+            1 for r in results
+            if r < 0
         )
 
-        bucket_total_r = sum(
-            bucket_results
-        )
+        total_r = sum(results)
 
-        bucket_avg_r = (
-            bucket_total_r / count
-            if count > 0
-            else 0
-        )
-
-        percentage = (
-            count / total_ops * 100
+        avg_r = (
+            total_r / total_ops
             if total_ops > 0
             else 0
         )
 
-        print(f"\n{bucket}")
-        print(
-            f"  Operaciones: {count}"
-        )
-        print(
-            f"  Porcentaje: {percentage:.2f}%"
-        )
-        print(
-            f"  Win rate: {bucket_win_rate:.2f}%"
-        )
-        print(
-            f"  R total: {bucket_total_r:.2f}"
-        )
-        print(
-            f"  R medio: {bucket_avg_r:.3f}"
+        win_rate = (
+            wins / total_ops * 100
+            if total_ops > 0
+            else 0
         )
 
-    # ========================================
-    # LONG / SHORT COMBINADO
-    # ========================================
+        max_dd = calculate_max_drawdown(
+            results
+        )
+
+        losing_streak = (
+            calculate_max_losing_streak(
+                results
+            )
+        )
+
+        profit_factor = (
+            calculate_profit_factor(
+                results
+            )
+        )
+
+        durations = [
+            trade["duration"]
+            for trade in trades
+        ]
+
+        avg_duration = (
+            sum(durations)
+            / len(durations)
+            if durations
+            else 0
+        )
+
+        combined_results[name] = {
+            "operations": total_ops,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "R": total_r,
+            "avg_R": avg_r,
+            "drawdown": max_dd,
+            "losing_streak":
+                losing_streak,
+            "profit_factor":
+                profit_factor,
+            "avg_duration":
+                avg_duration,
+        }
+
+        print("\n")
+        print(name)
+        print("-" * 35)
+
+        print(
+            f"OPERACIONES: {total_ops}"
+        )
+
+        print(
+            f"GANADORAS: {wins}"
+        )
+
+        print(
+            f"PERDEDORAS: {losses}"
+        )
+
+        print(
+            f"WIN RATE: "
+            f"{win_rate:.2f}%"
+        )
+
+        print(
+            f"R TOTAL: "
+            f"{total_r:.2f}"
+        )
+
+        print(
+            f"R MEDIO: "
+            f"{avg_r:.3f}"
+        )
+
+        print(
+            f"DRAWDOWN MÁXIMO: "
+            f"{max_dd:.2f} R"
+        )
+
+        print(
+            f"PEOR RACHA: "
+            f"{losing_streak}"
+        )
+
+        if profit_factor == float("inf"):
+            print(
+                "PROFIT FACTOR: inf"
+            )
+        else:
+            print(
+                f"PROFIT FACTOR: "
+                f"{profit_factor:.3f}"
+            )
+
+        print(
+            f"DURACIÓN MEDIA: "
+            f"{avg_duration:.1f} min"
+        )
+
+    # ==================================
+    # COMPARACIÓN COMBINADA
+    # ==================================
+
+    a = combined_results[
+        "SIN FILTRO"
+    ]
+
+    b = combined_results[
+        "0.5 ATR"
+    ]
 
     print("\n")
-    print("=" * 40)
-    print("LONG / SHORT")
-    print("=" * 40)
+    print("=" * 50)
+    print("COMPARACIÓN COMBINADA")
+    print("=" * 50)
 
-    long_trades = [
-        t for t in all_trades
-        if t["signal"] == "LONG"
-    ]
-
-    short_trades = [
-        t for t in all_trades
-        if t["signal"] == "SHORT"
-    ]
-
-    long_results = [
-        t["R"] for t in long_trades
-    ]
-
-    short_results = [
-        t["R"] for t in short_trades
-    ]
-
-    long_wins = sum(
-        1 for r in long_results
-        if r > 0
-    )
-
-    short_wins = sum(
-        1 for r in short_results
-        if r > 0
-    )
-
-    long_win_rate = (
-        long_wins / len(long_results) * 100
-        if long_results
-        else 0
-    )
-
-    short_win_rate = (
-        short_wins / len(short_results) * 100
-        if short_results
-        else 0
+    print(
+        f"\nCAMBIO OPERACIONES: "
+        f"{b['operations'] - a['operations']:+d}"
     )
 
     print(
-        f"\nLONG: "
-        f"{len(long_results)} ops | "
-        f"{long_win_rate:.2f}% | "
-        f"{sum(long_results):.2f} R"
+        f"CAMBIO WIN RATE: "
+        f"{b['win_rate'] - a['win_rate']:+.2f} puntos"
     )
 
     print(
-        f"\nSHORT: "
-        f"{len(short_results)} ops | "
-        f"{short_win_rate:.2f}% | "
-        f"{sum(short_results):.2f} R"
+        f"CAMBIO R TOTAL: "
+        f"{b['R'] - a['R']:+.2f} R"
     )
 
-    # ========================================
+    print(
+        f"CAMBIO R MEDIO: "
+        f"{b['avg_R'] - a['avg_R']:+.3f}"
+    )
+
+    print(
+        f"CAMBIO DRAWDOWN: "
+        f"{b['drawdown'] - a['drawdown']:+.2f} R"
+    )
+
+    print(
+        f"CAMBIO PEOR RACHA: "
+        f"{b['losing_streak'] - a['losing_streak']:+d}"
+    )
+
+    print(
+        f"CAMBIO PROFIT FACTOR: "
+        f"{b['profit_factor'] - a['profit_factor']:+.3f}"
+    )
+
+    # ==================================
     # RESUMEN POR PERÍODO
-    # ========================================
+    # ==================================
 
     print("\n")
-    print("=" * 40)
+    print("=" * 50)
     print("RESUMEN POR PERÍODO")
-    print("=" * 40)
+    print("=" * 50)
 
-    summary_df = pd.DataFrame(summary_rows)
+    summary_df = pd.DataFrame(
+        period_results
+    )
 
     if not summary_df.empty:
+
         print(
             summary_df.to_string(
                 index=False
             )
         )
 
+    # ==================================
+    # CONCLUSIÓN AUTOMÁTICA
+    # ==================================
+
     print("\n")
-    print("=" * 40)
+    print("=" * 50)
+    print("LECTURA AUTOMÁTICA")
+    print("=" * 50)
+
+    difference_R = (
+        b["R"] - a["R"]
+    )
+
+    difference_dd = (
+        b["drawdown"] - a["drawdown"]
+    )
+
+    difference_streak = (
+        b["losing_streak"]
+        - a["losing_streak"]
+    )
+
+    print()
+
+    if difference_R > 0:
+        print(
+            f"El filtro 0.5 ATR añade "
+            f"{difference_R:.2f} R."
+        )
+
+    elif difference_R < 0:
+        print(
+            f"El filtro 0.5 ATR resta "
+            f"{abs(difference_R):.2f} R."
+        )
+
+    else:
+        print(
+            "El filtro 0.5 ATR no cambia "
+            "el R total."
+        )
+
+    if difference_dd > 0:
+        print(
+            "El drawdown también mejora."
+        )
+
+    elif difference_dd < 0:
+        print(
+            "El drawdown empeora."
+        )
+
+    else:
+        print(
+            "El drawdown queda igual."
+        )
+
+    if difference_streak < 0:
+        print(
+            "La peor racha también mejora."
+        )
+
+    elif difference_streak > 0:
+        print(
+            "La peor racha empeora."
+        )
+
+    else:
+        print(
+            "La peor racha queda igual."
+        )
+
+    print("\n")
+    print("=" * 50)
     print("FIN DEL BACKTEST")
-    print("=" * 40)
+    print("=" * 50)
 
 
 if __name__ == "__main__":
