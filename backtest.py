@@ -154,11 +154,8 @@ while i < len(df) - 1:
         long_score += 1
 
 
-    if (
-        current["high"] > df.iloc[i - 1]["high"]
-        and current["low"] > df.iloc[i - 1]["low"]
-    ):
-        long_score += 1
+  if current["High"] > df.iloc[i - 3:i]["High"].max() and current["Low"] > df.iloc[i - 3:i]["Low"].min():
+    long_score += 1
 
 
     # =========================
@@ -181,11 +178,8 @@ while i < len(df) - 1:
 
 
 
-    if (
-        current["high"] < df.iloc[i - 1]["high"]
-        and current["low"] < df.iloc[i - 1]["low"]
-    ):
-        short_score += 1
+if current["High"] < df.iloc[i - 3:i]["High"].min() and current["Low"] < df.iloc[i - 3:i]["Low"].max():
+    short_score += 1
 
 
     # =========================
@@ -195,7 +189,7 @@ while i < len(df) - 1:
     signal = None
 
     if (
-        long_score >= 3
+        long_score >= 4
         and price > current["EMA20"]
         and current["EMA20"] > current["EMA50"]
         and long_score > short_score
@@ -203,7 +197,7 @@ while i < len(df) - 1:
         signal = "LONG"
 
     elif (
-        short_score >= 3
+        short_score >= 4
         and price < current["EMA20"]
         and current["EMA20"] < current["EMA50"]
         and short_score > long_score
