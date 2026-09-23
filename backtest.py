@@ -18,6 +18,8 @@ OUTPUT_SIZE = 5000
 # 2. EMA20 vs EMA50
 # 3. EMA50 vs EMA200
 # 4. Estructura de 1 vela
+#
+# Ahora exigimos las 4 condiciones
 SCORE_THRESHOLD = 4
 
 # Gestión de riesgo
@@ -27,10 +29,6 @@ TP_ATR = 3.0
 
 # Estructura de 1 vela
 STRUCTURE_LOOKBACK = 1
-
-# Máximo de duración de una operación
-# 36 velas de 5 minutos = 3 horas
-MAX_HOLD_CANDLES = 36
 
 
 # ============================================================
@@ -263,16 +261,14 @@ while i < len(df) - 1:
     # STOP Y TARGET
     # ========================================================
 
-    risk_distance = SL_ATR * atr
-
     if signal == "LONG":
 
-        stop = entry - risk_distance
+        stop = entry - (SL_ATR * atr)
         target = entry + (TP_ATR * atr)
 
     else:
 
-        stop = entry + risk_distance
+        stop = entry + (SL_ATR * atr)
         target = entry - (TP_ATR * atr)
 
 
@@ -284,16 +280,10 @@ while i < len(df) - 1:
     result_r = None
     exit_index = None
 
-    # Solo miramos como máximo 36 velas después de entrar
-    last_index = min(
-        i + MAX_HOLD_CANDLES,
-        len(df) - 1
-    )
-
     j = i + 1
 
 
-    while j <= last_index:
+    while j < len(df):
 
         future = df.iloc[j]
 
@@ -335,7 +325,8 @@ while i < len(df) - 1:
             hit_stop = high >= stop
             hit_target = low <= target
 
-            # Mismo criterio conservador
+            # Si toca ambos en la misma vela,
+            # mantenemos el criterio conservador.
             if hit_stop:
                 result = "LOSS"
                 result_r = -1
@@ -353,36 +344,11 @@ while i < len(df) - 1:
 
 
     # ========================================================
-    # CIERRE POR TIEMPO
+    # SI NO SE CERRÓ LA OPERACIÓN
     # ========================================================
 
     if result is None:
-
-        exit_index = last_index
-
-        exit_price = df.iloc[exit_index]["Close"]
-
-        if signal == "LONG":
-
-            result_r = (
-                (exit_price - entry)
-                / risk_distance
-            )
-
-        else:
-
-            result_r = (
-                (entry - exit_price)
-                / risk_distance
-            )
-
-        # Clasificación:
-        # positivo = WIN
-        # negativo o cero = LOSS
-        if result_r > 0:
-            result = "WIN"
-        else:
-            result = "LOSS"
+        break
 
 
     # ========================================================
