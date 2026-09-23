@@ -18,8 +18,6 @@ OUTPUT_SIZE = 5000
 # 2. EMA20 vs EMA50
 # 3. EMA50 vs EMA200
 # 4. Estructura de 1 vela
-#
-# Ahora exigimos las 4 condiciones
 SCORE_THRESHOLD = 4
 
 # Gestión de riesgo
@@ -301,7 +299,6 @@ while i < len(df) - 1:
             hit_target = high >= target
 
             # Si toca ambos en la misma vela,
-            # mantenemos el criterio conservador:
             # primero contamos el STOP.
             if hit_stop:
                 result = "LOSS"
@@ -326,7 +323,7 @@ while i < len(df) - 1:
             hit_target = low <= target
 
             # Si toca ambos en la misma vela,
-            # mantenemos el criterio conservador.
+            # primero contamos el STOP.
             if hit_stop:
                 result = "LOSS"
                 result_r = -1
@@ -396,6 +393,10 @@ if results.empty:
 
 else:
 
+    # ========================================================
+    # RESULTADOS GENERALES
+    # ========================================================
+
     total_trades = len(results)
 
     winners = (results["result"] == "WIN").sum()
@@ -427,11 +428,111 @@ else:
 
 
     # ========================================================
+    # RESULTADOS LONG
+    # ========================================================
+
+    long_results = results[
+        results["signal"] == "LONG"
+    ]
+
+    if not long_results.empty:
+
+        long_total = len(long_results)
+        long_winners = (
+            long_results["result"] == "WIN"
+        ).sum()
+        long_losers = (
+            long_results["result"] == "LOSS"
+        ).sum()
+
+        long_win_rate = (
+            long_winners / long_total
+        ) * 100
+
+        long_r = long_results["R"].sum()
+        long_avg_r = long_results["R"].mean()
+
+        print()
+        print("=========================")
+        print("RESULTADOS LONG")
+        print("=========================")
+
+        print()
+        print("OPERACIONES:", long_total)
+
+        print()
+        print("GANADORAS:", long_winners)
+
+        print()
+        print("PERDEDORAS:", long_losers)
+
+        print()
+        print(f"WIN RATE LONG: {long_win_rate:.2f}%")
+
+        print()
+        print(f"RESULTADO LONG: {long_r:.2f} R")
+
+        print()
+        print(f"PROMEDIO LONG: {long_avg_r:.3f} R")
+
+
+    # ========================================================
+    # RESULTADOS SHORT
+    # ========================================================
+
+    short_results = results[
+        results["signal"] == "SHORT"
+    ]
+
+    if not short_results.empty:
+
+        short_total = len(short_results)
+        short_winners = (
+            short_results["result"] == "WIN"
+        ).sum()
+        short_losers = (
+            short_results["result"] == "LOSS"
+        ).sum()
+
+        short_win_rate = (
+            short_winners / short_total
+        ) * 100
+
+        short_r = short_results["R"].sum()
+        short_avg_r = short_results["R"].mean()
+
+        print()
+        print("=========================")
+        print("RESULTADOS SHORT")
+        print("=========================")
+
+        print()
+        print("OPERACIONES:", short_total)
+
+        print()
+        print("GANADORAS:", short_winners)
+
+        print()
+        print("PERDEDORAS:", short_losers)
+
+        print()
+        print(f"WIN RATE SHORT: {short_win_rate:.2f}%")
+
+        print()
+        print(f"RESULTADO SHORT: {short_r:.2f} R")
+
+        print()
+        print(f"PROMEDIO SHORT: {short_avg_r:.3f} R")
+
+
+    # ========================================================
     # ÚLTIMAS OPERACIONES
     # ========================================================
 
     print()
-    print("ÚLTIMAS OPERACIONES:")
+    print("=========================")
+    print("ÚLTIMAS OPERACIONES")
+    print("=========================")
     print()
 
     print(
