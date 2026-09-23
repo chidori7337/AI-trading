@@ -13,12 +13,6 @@ SYMBOL = "EUR/USD"
 INTERVAL = "5min"
 OUTPUT_SIZE = 5000
 
-# ============================================================
-# PERÍODO NUEVO DE VALIDACIÓN
-# ============================================================
-
-END_DATE = "2026-05-31 23:55:00"
-
 
 # ============================================================
 # ESTRATEGIA CONGELADA
@@ -27,10 +21,22 @@ END_DATE = "2026-05-31 23:55:00"
 SCORE_THRESHOLD = 4
 
 ATR_PERIOD = 14
+
 SL_ATR = 1.5
 TP_ATR = 3.0
 
 STRUCTURE_LOOKBACK = 1
+
+
+# ============================================================
+# NUEVOS PERIODOS DE VALIDACIÓN
+# ============================================================
+
+VALIDATION_PERIODS = [
+    "2026-04-30 23:55:00",
+    "2026-03-31 23:55:00",
+    "2026-02-28 23:55:00"
+]
 
 
 # ============================================================
@@ -48,966 +54,1471 @@ if not API_KEY:
 # DESCARGAR DATOS
 # ============================================================
 
-url = "https://api.twelvedata.com/time_series"
+def download_data(end_date):
 
-params = {
+    url = "https://api.twelvedata.com/time_series"
 
-    "symbol": SYMBOL,
+    params = {
 
-    "interval": INTERVAL,
+        "symbol": SYMBOL,
 
-    "outputsize": OUTPUT_SIZE,
+        "interval": INTERVAL,
 
-    "end_date": END_DATE,
+        "outputsize": OUTPUT_SIZE,
 
-    "apikey": API_KEY,
+        "end_date": end_date,
 
-    "format": "JSON"
-}
+        "apikey": API_KEY,
 
-
-response = requests.get(
-
-    url,
-
-    params=params,
-
-    timeout=30
-)
+        "format": "JSON"
+    }
 
 
-response.raise_for_status()
+    response = requests.get(
 
+        url,
 
-data = response.json()
+        params=params,
 
-
-if "values" not in data:
-
-    raise ValueError(
-        f"Error descargando datos: {data}"
+        timeout=30
     )
 
 
-df = pd.DataFrame(
-    data["values"]
-)
+    response.raise_for_status()
 
 
-# ============================================================
-# PREPARAR DATOS
-# ============================================================
-
-df["datetime"] = pd.to_datetime(
-    df["datetime"]
-)
+    data = response.json()
 
 
-for column in [
+    if "values" not in data:
 
-    "open",
+        raise ValueError(
 
-    "high",
+            f"Error descargando datos: {data}"
 
-    "low",
+        )
 
-    "close"
 
-]:
+    df = pd.DataFrame(
 
-    df[column] = pd.to_numeric(
+        data["values"]
 
-        df[column],
-
-        errors="coerce"
     )
 
 
-df = (
-
-    df
-
-    .sort_values("datetime")
-
-    .reset_index(drop=True)
-
-)
-
-
-df.rename(
-
-    columns={
-
-        "open": "Open",
-
-        "high": "High",
-
-        "low": "Low",
-
-        "close": "Close"
-
-    },
-
-    inplace=True
-)
-
-
-df.dropna(
-
-    subset=[
-
-        "Open",
-
-        "High",
-
-        "Low",
-
-        "Close"
-
-    ],
-
-    inplace=True
-)
-
-
-df.reset_index(
-
-    drop=True,
-
-    inplace=True
-)
-
-
-print()
-
-print(
-    "VELAS OBTENIDAS:",
-    len(df)
-)
-
-print()
-
-print(
-    "DESDE:",
-    df["datetime"].iloc[0]
-)
-
-print()
-
-print(
-    "HASTA:",
-    df["datetime"].iloc[-1]
-)
-
-
-# ============================================================
-# EMA
-# ============================================================
-
-df["EMA20"] = df["Close"].ewm(
-
-    span=20,
-
-    adjust=False
-
-).mean()
-
-
-df["EMA50"] = df["Close"].ewm(
-
-    span=50,
-
-    adjust=False
-
-).mean()
-
-
-df["EMA200"] = df["Close"].ewm(
-
-    span=200,
-
-    adjust=False
-
-).mean()
-
-
-# ============================================================
-# ATR
-# ============================================================
-
-previous_close = (
-    df["Close"].shift(1)
-)
-
-
-tr1 = (
-    df["High"]
-    -
-    df["Low"]
-)
-
-
-tr2 = (
-    df["High"]
-    -
-    previous_close
-).abs()
-
-
-tr3 = (
-    df["Low"]
-    -
-    previous_close
-).abs()
-
-
-true_range = pd.concat(
-
-    [
-
-        tr1,
-
-        tr2,
-
-        tr3
-
-    ],
-
-    axis=1
-
-).max(axis=1)
-
-
-df["ATR"] = true_range.ewm(
-
-    alpha=1 / ATR_PERIOD,
-
-    adjust=False
-
-).mean()
-
-
-# ============================================================
-# ELIMINAR FILAS SIN INDICADORES
-# ============================================================
-
-df.dropna(
-
-    subset=[
-
-        "EMA20",
-
-        "EMA50",
-
-        "EMA200",
-
-        "ATR"
-
-    ],
-
-    inplace=True
-)
-
-
-df.reset_index(
-
-    drop=True,
-
-    inplace=True
-)
-
-
-print()
-
-print(
-    "INDICADORES CALCULADOS CORRECTAMENTE"
-)
-
-
-# ============================================================
-# BACKTEST INVERTIDO
-# ============================================================
-
-trades = []
-
-
-i = 200
-
-
-while i < len(df) - 1:
-
-
-    current = df.iloc[i]
-
-
-    long_score = 0
-
-    short_score = 0
-
-
     # ========================================================
-    # SEÑAL LONG ORIGINAL
+    # PREPARAR DATOS
     # ========================================================
 
-    if (
-        current["Close"]
-        >
-        current["EMA20"]
-    ):
+    df["datetime"] = pd.to_datetime(
 
-        long_score += 1
+        df["datetime"]
+
+    )
 
 
-    if (
-        current["EMA20"]
-        >
-        current["EMA50"]
-    ):
+    for column in [
 
-        long_score += 1
+        "open",
 
+        "high",
 
-    if (
-        current["EMA50"]
-        >
-        current["EMA200"]
-    ):
+        "low",
 
-        long_score += 1
+        "close"
 
+    ]:
 
-    if (
+        df[column] = pd.to_numeric(
 
-        current["High"]
-        >
-        df.iloc[i - STRUCTURE_LOOKBACK]["High"]
+            df[column],
 
-        and
+            errors="coerce"
 
-        current["Low"]
-        >
-        df.iloc[i - STRUCTURE_LOOKBACK]["Low"]
-
-    ):
-
-        long_score += 1
-
-
-    # ========================================================
-    # SEÑAL SHORT ORIGINAL
-    # ========================================================
-
-    if (
-        current["Close"]
-        <
-        current["EMA20"]
-    ):
-
-        short_score += 1
-
-
-    if (
-        current["EMA20"]
-        <
-        current["EMA50"]
-    ):
-
-        short_score += 1
-
-
-    if (
-        current["EMA50"]
-        <
-        current["EMA200"]
-    ):
-
-        short_score += 1
-
-
-    if (
-
-        current["High"]
-        <
-        df.iloc[i - STRUCTURE_LOOKBACK]["High"]
-
-        and
-
-        current["Low"]
-        <
-        df.iloc[i - STRUCTURE_LOOKBACK]["Low"]
-
-    ):
-
-        short_score += 1
-
-
-    # ========================================================
-    # SEÑAL ORIGINAL
-    # ========================================================
-
-    original_signal = None
-
-
-    if long_score >= SCORE_THRESHOLD:
-
-        original_signal = "LONG"
-
-
-    elif short_score >= SCORE_THRESHOLD:
-
-        original_signal = "SHORT"
-
-
-    if original_signal is None:
-
-        i += 1
-
-        continue
-
-
-    # ========================================================
-    # INVERTIR SEÑAL
-    # ========================================================
-
-    if original_signal == "LONG":
-
-        signal = "SHORT"
-
-    else:
-
-        signal = "LONG"
-
-
-    # ========================================================
-    # ENTRADA
-    # ========================================================
-
-    entry = current["Close"]
-
-    atr = current["ATR"]
-
-
-    if atr <= 0:
-
-        i += 1
-
-        continue
-
-
-    # ========================================================
-    # STOP Y TARGET
-    # ========================================================
-
-    if signal == "LONG":
-
-        stop = (
-            entry
-            -
-            (SL_ATR * atr)
-        )
-
-        target = (
-            entry
-            +
-            (TP_ATR * atr)
         )
 
 
-    else:
+    df = (
 
-        stop = (
-            entry
-            +
-            (SL_ATR * atr)
-        )
+        df
 
-        target = (
-            entry
-            -
-            (TP_ATR * atr)
-        )
+        .sort_values("datetime")
+
+        .reset_index(drop=True)
+
+    )
+
+
+    df.rename(
+
+        columns={
+
+            "open": "Open",
+
+            "high": "High",
+
+            "low": "Low",
+
+            "close": "Close"
+
+        },
+
+        inplace=True
+
+    )
+
+
+    df.dropna(
+
+        subset=[
+
+            "Open",
+
+            "High",
+
+            "Low",
+
+            "Close"
+
+        ],
+
+        inplace=True
+
+    )
+
+
+    df.reset_index(
+
+        drop=True,
+
+        inplace=True
+
+    )
+
+
+    return df
+
+
+# ============================================================
+# BACKTEST
+# ============================================================
+
+def run_backtest(df):
+
+    # ========================================================
+    # EMA
+    # ========================================================
+
+    df["EMA20"] = df["Close"].ewm(
+
+        span=20,
+
+        adjust=False
+
+    ).mean()
+
+
+    df["EMA50"] = df["Close"].ewm(
+
+        span=50,
+
+        adjust=False
+
+    ).mean()
+
+
+    df["EMA200"] = df["Close"].ewm(
+
+        span=200,
+
+        adjust=False
+
+    ).mean()
 
 
     # ========================================================
-    # BUSCAR SALIDA
+    # ATR
     # ========================================================
 
-    result = None
+    previous_close = (
 
-    result_r = None
+        df["Close"].shift(1)
 
-    exit_index = None
-
-
-    j = i + 1
+    )
 
 
-    while j < len(df):
+    tr1 = (
+
+        df["High"]
+
+        -
+
+        df["Low"]
+
+    )
 
 
-        future = df.iloc[j]
+    tr2 = (
+
+        df["High"]
+
+        -
+
+        previous_close
+
+    ).abs()
 
 
-        high = future["High"]
+    tr3 = (
 
-        low = future["Low"]
+        df["Low"]
+
+        -
+
+        previous_close
+
+    ).abs()
+
+
+    true_range = pd.concat(
+
+        [
+
+            tr1,
+
+            tr2,
+
+            tr3
+
+        ],
+
+        axis=1
+
+    ).max(axis=1)
+
+
+    df["ATR"] = true_range.ewm(
+
+        alpha=1 / ATR_PERIOD,
+
+        adjust=False
+
+    ).mean()
+
+
+    # ========================================================
+    # ELIMINAR FILAS SIN INDICADORES
+    # ========================================================
+
+    df.dropna(
+
+        subset=[
+
+            "EMA20",
+
+            "EMA50",
+
+            "EMA200",
+
+            "ATR"
+
+        ],
+
+        inplace=True
+
+    )
+
+
+    df.reset_index(
+
+        drop=True,
+
+        inplace=True
+
+    )
+
+
+    # ========================================================
+    # BACKTEST
+    # ========================================================
+
+    trades = []
+
+
+    i = 200
+
+
+    while i < len(df) - 1:
+
+        current = df.iloc[i]
+
+
+        long_score = 0
+
+        short_score = 0
 
 
         # ====================================================
-        # LONG
+        # LONG ORIGINAL
+        # ====================================================
+
+        # 1. Precio > EMA20
+
+        if (
+
+            current["Close"]
+
+            >
+
+            current["EMA20"]
+
+        ):
+
+            long_score += 1
+
+
+        # 2. EMA20 > EMA50
+
+        if (
+
+            current["EMA20"]
+
+            >
+
+            current["EMA50"]
+
+        ):
+
+            long_score += 1
+
+
+        # 3. EMA50 > EMA200
+
+        if (
+
+            current["EMA50"]
+
+            >
+
+            current["EMA200"]
+
+        ):
+
+            long_score += 1
+
+
+        # 4. Estructura alcista
+
+        if (
+
+            current["High"]
+
+            >
+
+            df.iloc[
+
+                i - STRUCTURE_LOOKBACK
+
+            ]["High"]
+
+            and
+
+            current["Low"]
+
+            >
+
+            df.iloc[
+
+                i - STRUCTURE_LOOKBACK
+
+            ]["Low"]
+
+        ):
+
+            long_score += 1
+
+
+        # ====================================================
+        # SHORT ORIGINAL
+        # ====================================================
+
+        # 1. Precio < EMA20
+
+        if (
+
+            current["Close"]
+
+            <
+
+            current["EMA20"]
+
+        ):
+
+            short_score += 1
+
+
+        # 2. EMA20 < EMA50
+
+        if (
+
+            current["EMA20"]
+
+            <
+
+            current["EMA50"]
+
+        ):
+
+            short_score += 1
+
+
+        # 3. EMA50 < EMA200
+
+        if (
+
+            current["EMA50"]
+
+            <
+
+            current["EMA200"]
+
+        ):
+
+            short_score += 1
+
+
+        # 4. Estructura bajista
+
+        if (
+
+            current["High"]
+
+            <
+
+            df.iloc[
+
+                i - STRUCTURE_LOOKBACK
+
+            ]["High"]
+
+            and
+
+            current["Low"]
+
+            <
+
+            df.iloc[
+
+                i - STRUCTURE_LOOKBACK
+
+            ]["Low"]
+
+        ):
+
+            short_score += 1
+
+
+        # ====================================================
+        # SEÑAL ORIGINAL
+        # ====================================================
+
+        original_signal = None
+
+
+        if (
+
+            long_score
+
+            >=
+
+            SCORE_THRESHOLD
+
+        ):
+
+            original_signal = "LONG"
+
+
+        elif (
+
+            short_score
+
+            >=
+
+            SCORE_THRESHOLD
+
+        ):
+
+            original_signal = "SHORT"
+
+
+        # Sin señal
+
+        if original_signal is None:
+
+            i += 1
+
+            continue
+
+
+        # ====================================================
+        # INVERTIR SEÑAL
+        # ====================================================
+
+        if original_signal == "LONG":
+
+            signal = "SHORT"
+
+        else:
+
+            signal = "LONG"
+
+
+        # ====================================================
+        # ENTRADA
+        # ====================================================
+
+        entry = current["Close"]
+
+        atr = current["ATR"]
+
+
+        if atr <= 0:
+
+            i += 1
+
+            continue
+
+
+        # ====================================================
+        # STOP Y TARGET
         # ====================================================
 
         if signal == "LONG":
 
-            hit_stop = (
-                low <= stop
+            stop = (
+
+                entry
+
+                -
+
+                (SL_ATR * atr)
+
             )
 
-            hit_target = (
-                high >= target
+
+            target = (
+
+                entry
+
+                +
+
+                (TP_ATR * atr)
+
             )
 
-
-            if hit_stop:
-
-                result = "LOSS"
-
-                result_r = -1
-
-                exit_index = j
-
-                break
-
-
-            if hit_target:
-
-                result = "WIN"
-
-                result_r = 2
-
-                exit_index = j
-
-                break
-
-
-        # ====================================================
-        # SHORT
-        # ====================================================
 
         else:
 
-            hit_stop = (
-                high >= stop
+            stop = (
+
+                entry
+
+                +
+
+                (SL_ATR * atr)
+
             )
 
-            hit_target = (
-                low <= target
+
+            target = (
+
+                entry
+
+                -
+
+                (TP_ATR * atr)
+
             )
 
 
-            if hit_stop:
+        # ====================================================
+        # BUSCAR SALIDA
+        # ====================================================
 
-                result = "LOSS"
+        result = None
 
-                result_r = -1
+        result_r = None
 
-                exit_index = j
-
-                break
-
-
-            if hit_target:
-
-                result = "WIN"
-
-                result_r = 2
-
-                exit_index = j
-
-                break
+        exit_index = None
 
 
-        j += 1
+        j = i + 1
 
 
-    # ========================================================
-    # SI NO SE CERRÓ
-    # ========================================================
+        while j < len(df):
 
-    if result is None:
+            future = df.iloc[j]
 
-        break
+            high = future["High"]
+
+            low = future["Low"]
 
 
-    # ========================================================
-    # GUARDAR OPERACIÓN
-    # ========================================================
+            # =================================================
+            # LONG
+            # =================================================
 
-    trades.append(
+            if signal == "LONG":
 
-        {
+                hit_stop = (
 
-            "datetime":
-            current["datetime"],
+                    low <= stop
 
-            "original_signal":
-            original_signal,
+                )
 
-            "signal":
-            signal,
 
-            "entry":
-            entry,
+                hit_target = (
 
-            "stop":
-            stop,
+                    high >= target
 
-            "target":
-            target,
+                )
 
-            "result":
-            result,
 
-            "R":
-            result_r
+                # Criterio conservador:
+                # si toca ambos en la misma vela,
+                # contamos STOP primero.
 
-        }
+                if hit_stop:
 
+                    result = "LOSS"
+
+                    result_r = -1
+
+                    exit_index = j
+
+                    break
+
+
+                if hit_target:
+
+                    result = "WIN"
+
+                    result_r = 2
+
+                    exit_index = j
+
+                    break
+
+
+            # =================================================
+            # SHORT
+            # =================================================
+
+            else:
+
+                hit_stop = (
+
+                    high >= stop
+
+                )
+
+
+                hit_target = (
+
+                    low <= target
+
+                )
+
+
+                if hit_stop:
+
+                    result = "LOSS"
+
+                    result_r = -1
+
+                    exit_index = j
+
+                    break
+
+
+                if hit_target:
+
+                    result = "WIN"
+
+                    result_r = 2
+
+                    exit_index = j
+
+                    break
+
+
+            j += 1
+
+
+        # ====================================================
+        # SI NO SE CERRÓ
+        # ====================================================
+
+        if result is None:
+
+            break
+
+
+        # ====================================================
+        # GUARDAR OPERACIÓN
+        # ====================================================
+
+        trades.append(
+
+            {
+
+                "datetime":
+                    current["datetime"],
+
+                "original_signal":
+                    original_signal,
+
+                "signal":
+                    signal,
+
+                "entry":
+                    entry,
+
+                "stop":
+                    stop,
+
+                "target":
+                    target,
+
+                "result":
+                    result,
+
+                "R":
+                    result_r
+
+            }
+
+        )
+
+
+        # ====================================================
+        # UNA SOLA OPERACIÓN ABIERTA
+        # ====================================================
+
+        i = exit_index + 1
+
+
+    return pd.DataFrame(
+        trades
     )
 
 
-    # ========================================================
-    # UNA SOLA OPERACIÓN ABIERTA
-    # ========================================================
-
-    i = exit_index + 1
-
-
 # ============================================================
-# RESULTADOS
+# EJECUTAR PERIODOS
 # ============================================================
 
-results = pd.DataFrame(
-    trades
-)
+all_results = []
 
 
-print()
+for period_number, end_date in enumerate(
 
-print(
-    "========================="
-)
+    VALIDATION_PERIODS,
 
-print(
-    "VALIDACIÓN MAYO 2026"
-)
+    start=1
 
-print(
-    "========================="
-)
+):
 
-
-if results.empty:
+    print()
 
     print()
 
     print(
-        "No se encontraron operaciones."
+        "########################################"
     )
 
-else:
+    print(
+
+        f"PERIODO HISTÓRICO {period_number}"
+
+    )
+
+    print(
+        "########################################"
+    )
+
+
+    print()
+
+    print(
+
+        f"FINAL DE DATOS: {end_date}"
+
+    )
+
+
+    # ========================================================
+    # DESCARGAR DATOS
+    # ========================================================
+
+    df = download_data(
+
+        end_date
+
+    )
+
+
+    print()
+
+    print(
+
+        "VELAS OBTENIDAS:",
+
+        len(df)
+
+    )
+
+
+    print()
+
+    print(
+
+        "DESDE:",
+
+        df["datetime"].iloc[0]
+
+    )
+
+
+    print()
+
+    print(
+
+        "HASTA:",
+
+        df["datetime"].iloc[-1]
+
+    )
+
+
+    # ========================================================
+    # BACKTEST
+    # ========================================================
+
+    results = run_backtest(
+
+        df
+
+    )
+
+
+    print()
+
+    print(
+
+        "INDICADORES CALCULADOS CORRECTAMENTE"
+
+    )
+
+
+    if results.empty:
+
+        print()
+
+        print(
+
+            "No se encontraron operaciones."
+
+        )
+
+        continue
+
 
     # ========================================================
     # RESULTADOS GENERALES
     # ========================================================
 
     total_trades = len(
+
         results
+
     )
 
 
     winners = (
+
         results["result"]
+
         ==
+
         "WIN"
+
     ).sum()
 
 
     losers = (
+
         results["result"]
+
         ==
+
         "LOSS"
+
     ).sum()
 
 
     win_rate = (
+
         winners
+
         /
+
         total_trades
+
     ) * 100
 
 
     total_r = (
+
         results["R"]
+
         .sum()
+
     )
 
 
     average_r = (
+
         results["R"]
+
         .mean()
+
     )
 
 
     print()
 
     print(
+        "========================="
+    )
+
+    print(
+        "RESULTADOS SEÑALES INVERTIDAS"
+    )
+
+    print(
+        "========================="
+    )
+
+
+    print()
+
+    print(
+
         "OPERACIONES:",
+
         total_trades
+
     )
+
 
     print()
 
     print(
+
         "GANADORAS:",
+
         winners
+
     )
+
 
     print()
 
     print(
+
         "PERDEDORAS:",
+
         losers
+
     )
+
 
     print()
 
     print(
+
         f"WIN RATE: {win_rate:.2f}%"
+
     )
+
 
     print()
 
     print(
-        f"RESULTADO TOTAL: "
-        f"{total_r:.2f} R"
+
+        f"RESULTADO: {total_r:.2f} R"
+
     )
+
 
     print()
 
     print(
-        f"PROMEDIO POR OPERACIÓN: "
-        f"{average_r:.3f} R"
+
+        f"PROMEDIO: {average_r:.3f} R"
+
     )
 
 
     # ========================================================
-    # LONG
+    # LONG INVERTIDO
     # ========================================================
 
     long_results = results[
-        results["signal"] == "LONG"
+
+        results["signal"]
+
+        ==
+
+        "LONG"
+
     ]
 
 
     if not long_results.empty:
 
         long_total = len(
+
             long_results
+
         )
 
-        long_winners = (
+
+        long_wins = (
+
             long_results["result"]
+
             ==
+
             "WIN"
+
         ).sum()
 
-        long_losers = (
+
+        long_losses = (
+
             long_results["result"]
+
             ==
+
             "LOSS"
+
         ).sum()
+
 
         long_win_rate = (
-            long_winners
+
+            long_wins
+
             /
+
             long_total
+
         ) * 100
 
+
         long_r = (
+
             long_results["R"]
+
             .sum()
+
         )
+
 
         print()
 
         print(
-            "========================="
+
+            "LONG INVERTIDO:"
+
         )
 
+
         print(
-            "LONG INVERTIDO"
+
+            f"  Operaciones: {long_total}"
+
         )
 
+
         print(
-            "========================="
+
+            f"  Ganadoras: {long_wins}"
+
         )
 
-        print()
 
         print(
-            "OPERACIONES:",
-            long_total
+
+            f"  Perdedoras: {long_losses}"
+
         )
 
-        print()
 
         print(
-            "GANADORAS:",
-            long_winners
+
+            f"  Win rate: {long_win_rate:.2f}%"
+
         )
 
-        print()
 
         print(
-            "PERDEDORAS:",
-            long_losers
-        )
 
-        print()
+            f"  Resultado: {long_r:.2f} R"
 
-        print(
-            f"WIN RATE LONG: "
-            f"{long_win_rate:.2f}%"
-        )
-
-        print()
-
-        print(
-            f"RESULTADO LONG: "
-            f"{long_r:.2f} R"
         )
 
 
     # ========================================================
-    # SHORT
+    # SHORT INVERTIDO
     # ========================================================
 
     short_results = results[
-        results["signal"] == "SHORT"
+
+        results["signal"]
+
+        ==
+
+        "SHORT"
+
     ]
 
 
     if not short_results.empty:
 
         short_total = len(
+
             short_results
+
         )
 
-        short_winners = (
+
+        short_wins = (
+
             short_results["result"]
+
             ==
+
             "WIN"
+
         ).sum()
 
-        short_losers = (
+
+        short_losses = (
+
             short_results["result"]
+
             ==
+
             "LOSS"
+
         ).sum()
+
 
         short_win_rate = (
-            short_winners
+
+            short_wins
+
             /
+
             short_total
+
         ) * 100
 
+
         short_r = (
+
             short_results["R"]
+
             .sum()
+
         )
+
 
         print()
 
         print(
-            "========================="
+
+            "SHORT INVERTIDO:"
+
         )
 
+
         print(
-            "SHORT INVERTIDO"
+
+            f"  Operaciones: {short_total}"
+
         )
 
+
         print(
-            "========================="
+
+            f"  Ganadoras: {short_wins}"
+
         )
 
-        print()
 
         print(
-            "OPERACIONES:",
-            short_total
+
+            f"  Perdedoras: {short_losses}"
+
         )
 
-        print()
 
         print(
-            "GANADORAS:",
-            short_winners
+
+            f"  Win rate: {short_win_rate:.2f}%"
+
         )
 
-        print()
 
         print(
-            "PERDEDORAS:",
-            short_losers
-        )
 
-        print()
+            f"  Resultado: {short_r:.2f} R"
 
-        print(
-            f"WIN RATE SHORT: "
-            f"{short_win_rate:.2f}%"
-        )
-
-        print()
-
-        print(
-            f"RESULTADO SHORT: "
-            f"{short_r:.2f} R"
         )
 
 
     # ========================================================
-    # ÚLTIMAS OPERACIONES
+    # GUARDAR RESULTADO
     # ========================================================
 
+    all_results.append(
+
+        {
+
+            "periodo":
+
+                period_number,
+
+            "final":
+
+                end_date,
+
+            "operaciones":
+
+                total_trades,
+
+            "ganadoras":
+
+                winners,
+
+            "perdedoras":
+
+                losers,
+
+            "win_rate":
+
+                win_rate,
+
+            "R":
+
+                total_r,
+
+            "R_promedio":
+
+                average_r
+
+        }
+
+    )
+
+
+# ============================================================
+# RESUMEN FINAL
+# ============================================================
+
+print()
+
+print()
+
+print(
+    "========================================"
+)
+
+print(
+    "RESUMEN ABRIL + MARZO + FEBRERO"
+)
+
+print(
+    "========================================"
+)
+
+
+if not all_results:
+
     print()
 
     print(
-        "========================="
+        "No hubo resultados."
     )
 
-    print(
-        "ÚLTIMAS OPERACIONES"
+else:
+
+    summary = pd.DataFrame(
+
+        all_results
+
     )
 
-    print(
-        "========================="
-    )
 
     print()
 
     print(
-        results[
-            [
-                "datetime",
-                "original_signal",
-                "signal",
-                "entry",
-                "result",
-                "R"
-            ]
-        ]
-        .tail(10)
-        .to_string(index=False)
+
+        summary.to_string(
+            index=False
+        )
+
+    )
+
+
+    # ========================================================
+    # TOTAL COMBINADO
+    # ========================================================
+
+    total_operations = (
+
+        summary["operaciones"]
+
+        .sum()
+
+    )
+
+
+    total_winners = (
+
+        summary["ganadoras"]
+
+        .sum()
+
+    )
+
+
+    total_losers = (
+
+        summary["perdedoras"]
+
+        .sum()
+
+    )
+
+
+    combined_win_rate = (
+
+        total_winners
+
+        /
+
+        total_operations
+
+    ) * 100
+
+
+    combined_r = (
+
+        summary["R"]
+
+        .sum()
+
+    )
+
+
+    combined_average = (
+
+        combined_r
+
+        /
+
+        total_operations
+
+    )
+
+
+    print()
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "TOTAL COMBINADO"
+    )
+
+    print(
+        "========================================"
+    )
+
+
+    print()
+
+    print(
+
+        "OPERACIONES:",
+
+        total_operations
+
+    )
+
+
+    print()
+
+    print(
+
+        "GANADORAS:",
+
+        total_winners
+
+    )
+
+
+    print()
+
+    print(
+
+        "PERDEDORAS:",
+
+        total_losers
+
+    )
+
+
+    print()
+
+    print(
+
+        f"WIN RATE: "
+        f"{combined_win_rate:.2f}%"
+
+    )
+
+
+    print()
+
+    print(
+
+        f"RESULTADO TOTAL: "
+        f"{combined_r:.2f} R"
+
+    )
+
+
+    print()
+
+    print(
+
+        f"PROMEDIO POR OPERACIÓN: "
+        f"{combined_average:.3f} R"
+
     )
