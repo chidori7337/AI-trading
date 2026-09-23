@@ -10,33 +10,28 @@ import pandas as pd
 API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 
 SYMBOL = "EUR/USD"
-
-INTERVAL_5M = "5min"
-INTERVAL_15M = "15min"
-
-OUTPUT_SIZE_5M = 5000
-OUTPUT_SIZE_15M = 2500
+INTERVAL = "5min"
+OUTPUT_SIZE = 5000
 
 
 # ============================================================
-# GESTIÓN DE RIESGO
+# ESTRATEGIA ORIGINAL
 # ============================================================
 
+# 4/4 condiciones
+SCORE_THRESHOLD = 4
+
+# Gestión de riesgo
 ATR_PERIOD = 14
-
 SL_ATR = 1.5
 TP_ATR = 3.0
 
-
-# ============================================================
-# ESTRUCTURA
-# ============================================================
-
+# Estructura de 1 vela
 STRUCTURE_LOOKBACK = 1
 
 
 # ============================================================
-# PERIODOS HISTÓRICOS A VALIDAR
+# PERIODOS HISTÓRICOS
 # ============================================================
 
 VALIDATION_PERIODS = [
@@ -60,23 +55,18 @@ if not API_KEY:
 # DESCARGAR DATOS
 # ============================================================
 
-def download_data(
-    interval,
-    outputsize,
-    end_date
-):
+def download_data(end_date):
 
     url = "https://api.twelvedata.com/time_series"
 
     params = {
         "symbol": SYMBOL,
-        "interval": interval,
-        "outputsize": outputsize,
+        "interval": INTERVAL,
+        "outputsize": OUTPUT_SIZE,
         "end_date": end_date,
         "apikey": API_KEY,
         "format": "JSON"
     }
-
 
     response = requests.get(
         url,
@@ -84,29 +74,22 @@ def download_data(
         timeout=30
     )
 
-
     response.raise_for_status()
-
 
     data = response.json()
 
-
     if "values" not in data:
-
         raise ValueError(
-            f"Error descargando {interval}: {data}"
+            f"Error descargando datos: {data}"
         )
-
 
     df = pd.DataFrame(
         data["values"]
     )
 
-
     df["datetime"] = pd.to_datetime(
         df["datetime"]
     )
-
 
     for column in [
         "open",
@@ -120,13 +103,11 @@ def download_data(
             errors="coerce"
         )
 
-
     df = (
         df
         .sort_values("datetime")
         .reset_index(drop=True)
     )
-
 
     df.rename(
         columns={
@@ -138,7 +119,6 @@ def download_data(
         inplace=True
     )
 
-
     df.dropna(
         subset=[
             "Open",
@@ -149,26 +129,45 @@ def download_data(
         inplace=True
     )
 
-
     df.reset_index(
         drop=True,
         inplace=True
     )
 
-
     return df
 
 
 # ============================================================
-# CALCULAR ATR EN 5M
+# BACKTEST
 # ============================================================
 
-def calculate_atr(df):
+def run_backtest(df):
 
-    previous_close = (
-        df["Close"].shift(1)
-    )
+    # ========================================================
+    # EMA
+    # ========================================================
 
+    df["EMA20"] = df["Close"].ewm(
+        span=20,
+        adjust=False
+    ).mean()
+
+    df["EMA50"] = df["Close"].ewm(
+        span=50,
+        adjust=False
+    ).mean()
+
+    df["EMA200"] = df["Close"].ewm(
+        span=200,
+        adjust=False
+    ).mean()
+
+
+    # ========================================================
+    # ATR
+    # ========================================================
+
+    previous_close = df["Close"].shift(1)
 
     tr1 = (
         df["High"]
@@ -176,20 +175,17 @@ def calculate_atr(df):
         df["Low"]
     )
 
-
     tr2 = (
         df["High"]
         -
         previous_close
     ).abs()
 
-
     tr3 = (
         df["Low"]
         -
         previous_close
     ).abs()
-
 
     true_range = pd.concat(
         [
@@ -200,159 +196,27 @@ def calculate_atr(df):
         axis=1
     ).max(axis=1)
 
-
     df["ATR"] = true_range.ewm(
         alpha=1 / ATR_PERIOD,
         adjust=False
     ).mean()
 
 
-    return df
-
-
-# ============================================================
-# BACKTEST DE UN PERÍODO
-# ============================================================
-
-def run_backtest(
-    df5,
-    df15
-):
-
-    # ========================================================
-    # EMAs 5M
-    # ========================================================
-
-    df5["EMA20"] = df5["Close"].ewm(
-        span=20,
-        adjust=False
-    ).mean()
-
-
-    df5["EMA50"] = df5["Close"].ewm(
-        span=50,
-        adjust=False
-    ).mean()
-
-
-    df5["EMA200"] = df5["Close"].ewm(
-        span=200,
-        adjust=False
-    ).mean()
-
-
-    # ========================================================
-    # ATR 5M
-    # ========================================================
-
-    df5 = calculate_atr(
-        df5
-    )
-
-
-    # ========================================================
-    # EMAS 15M
-    # ========================================================
-
-    df15["EMA50"] = df15["Close"].ewm(
-        span=50,
-        adjust=False
-    ).mean()
-
-
-    df15["EMA200"] = df15["Close"].ewm(
-        span=200,
-        adjust=False
-    ).mean()
-
-
-    # ========================================================
-    # TENDENCIA 15M
-    # ========================================================
-    #
-    # Muy importante:
-    #
-    # Una vela de 15 minutos con timestamp 10:00
-    # representa aproximadamente 10:00-10:15.
-    #
-    # Para una vela de 5 minutos que empieza a las 10:10,
-    # esa vela de 15m todavía no está cerrada.
-    #
-    # Por eso usamos la vela de 15m anterior.
-    #
-    # Ejemplo:
-    #
-    # 5m = 10:10 -> usamos 15m = 09:45
-    # 5m = 10:15 -> podemos usar 15m = 10:00
-    #
-
-    df5["completed_15m"] = (
-        df5["datetime"].dt.floor("15min")
-        -
-        pd.Timedelta(minutes=15)
-    )
-
-
-    trend15 = df15[
-        [
-            "datetime",
-            "EMA50",
-            "EMA200"
-        ]
-    ].copy()
-
-
-    trend15.rename(
-        columns={
-            "datetime": "completed_15m",
-            "EMA50": "EMA50_15M",
-            "EMA200": "EMA200_15M"
-        },
-        inplace=True
-    )
-
-
-    trend15 = trend15.sort_values(
-        "completed_15m"
-    )
-
-
-    df5 = df5.sort_values(
-        "completed_15m"
-    )
-
-
-    df5 = pd.merge_asof(
-        df5,
-        trend15,
-        on="completed_15m",
-        direction="backward"
-    )
-
-
-    df5 = df5.sort_values(
-        "datetime"
-    ).reset_index(drop=True)
-
-
     # ========================================================
     # ELIMINAR FILAS SIN INDICADORES
     # ========================================================
 
-    df5.dropna(
+    df.dropna(
         subset=[
             "EMA20",
             "EMA50",
             "EMA200",
-            "ATR",
-            "EMA50_15M",
-            "EMA200_15M"
+            "ATR"
         ],
         inplace=True
     )
 
-
-    df5.reset_index(
+    df.reset_index(
         drop=True,
         inplace=True
     )
@@ -364,138 +228,126 @@ def run_backtest(
 
     trades = []
 
-
     i = 200
 
 
-    while i < len(df5) - 1:
+    while i < len(df) - 1:
 
-        current = df5.iloc[i]
+        current = df.iloc[i]
 
-
-        signal = None
+        long_score = 0
+        short_score = 0
 
 
         # ====================================================
-        # LONG
+        # LONG ORIGINAL
         # ====================================================
 
-        long_trend_15m = (
-            current["EMA50_15M"]
-            >
-            current["EMA200_15M"]
-        )
+        # 1. Precio > EMA20
+        if current["Close"] > current["EMA20"]:
+
+            long_score += 1
 
 
-        long_price = (
-            current["Close"]
-            >
-            current["EMA20"]
-        )
+        # 2. EMA20 > EMA50
+        if current["EMA20"] > current["EMA50"]:
+
+            long_score += 1
 
 
-        long_ema = (
-            current["EMA20"]
-            >
-            current["EMA50"]
-        )
+        # 3. EMA50 > EMA200
+        if current["EMA50"] > current["EMA200"]:
+
+            long_score += 1
 
 
-        long_structure = (
+        # 4. Estructura alcista
+        if (
             current["High"]
             >
-            df5.iloc[
-                i - STRUCTURE_LOOKBACK:i
-            ]["High"].max()
+            df.iloc[i - STRUCTURE_LOOKBACK]["High"]
 
             and
 
             current["Low"]
             >
-            df5.iloc[
-                i - STRUCTURE_LOOKBACK:i
-            ]["Low"].min()
-        )
-
-
-        if (
-            long_trend_15m
-            and
-            long_price
-            and
-            long_ema
-            and
-            long_structure
+            df.iloc[i - STRUCTURE_LOOKBACK]["Low"]
         ):
 
-            signal = "LONG"
+            long_score += 1
 
 
         # ====================================================
-        # SHORT
+        # SHORT ORIGINAL
         # ====================================================
 
-        short_trend_15m = (
-            current["EMA50_15M"]
-            <
-            current["EMA200_15M"]
-        )
+        # 1. Precio < EMA20
+        if current["Close"] < current["EMA20"]:
+
+            short_score += 1
 
 
-        short_price = (
-            current["Close"]
-            <
-            current["EMA20"]
-        )
+        # 2. EMA20 < EMA50
+        if current["EMA20"] < current["EMA50"]:
+
+            short_score += 1
 
 
-        short_ema = (
-            current["EMA20"]
-            <
-            current["EMA50"]
-        )
+        # 3. EMA50 < EMA200
+        if current["EMA50"] < current["EMA200"]:
+
+            short_score += 1
 
 
-        short_structure = (
+        # 4. Estructura bajista
+        if (
             current["High"]
             <
-            df5.iloc[
-                i - STRUCTURE_LOOKBACK:i
-            ]["High"].min()
+            df.iloc[i - STRUCTURE_LOOKBACK]["High"]
 
             and
 
             current["Low"]
             <
-            df5.iloc[
-                i - STRUCTURE_LOOKBACK:i
-            ]["Low"].max()
-        )
-
-
-        if (
-            signal is None
-            and
-            short_trend_15m
-            and
-            short_price
-            and
-            short_ema
-            and
-            short_structure
+            df.iloc[i - STRUCTURE_LOOKBACK]["Low"]
         ):
 
-            signal = "SHORT"
+            short_score += 1
 
 
         # ====================================================
-        # SIN SEÑAL
+        # SEÑAL ORIGINAL
         # ====================================================
 
-        if signal is None:
+        original_signal = None
+
+        if long_score >= SCORE_THRESHOLD:
+
+            original_signal = "LONG"
+
+        elif short_score >= SCORE_THRESHOLD:
+
+            original_signal = "SHORT"
+
+
+        # Sin señal
+        if original_signal is None:
 
             i += 1
             continue
+
+
+        # ====================================================
+        # INVERTIR LA SEÑAL
+        # ====================================================
+
+        if original_signal == "LONG":
+
+            signal = "SHORT"
+
+        else:
+
+            signal = "LONG"
 
 
         # ====================================================
@@ -517,19 +369,13 @@ def run_backtest(
         # STOP Y TARGET
         # ====================================================
 
-        risk_distance = (
-            SL_ATR * atr
-        )
-
-
         if signal == "LONG":
 
             stop = (
                 entry
                 -
-                risk_distance
+                (SL_ATR * atr)
             )
-
 
             target = (
                 entry
@@ -537,15 +383,13 @@ def run_backtest(
                 (TP_ATR * atr)
             )
 
-
         else:
 
             stop = (
                 entry
                 +
-                risk_distance
+                (SL_ATR * atr)
             )
-
 
             target = (
                 entry
@@ -564,13 +408,12 @@ def run_backtest(
 
         exit_index = None
 
-
         j = i + 1
 
 
-        while j < len(df5):
+        while j < len(df):
 
-            future = df5.iloc[j]
+            future = df.iloc[j]
 
             high = future["High"]
 
@@ -578,7 +421,7 @@ def run_backtest(
 
 
             # =================================================
-            # LONG
+            # LONG INVERTIDO
             # =================================================
 
             if signal == "LONG":
@@ -587,22 +430,15 @@ def run_backtest(
                     low <= stop
                 )
 
-
                 hit_target = (
                     high >= target
                 )
 
-
-                # Criterio conservador:
-                # si toca ambos en la misma vela,
-                # contamos STOP primero.
-
+                # Criterio conservador
                 if hit_stop:
 
                     result = "LOSS"
-
                     result_r = -1
-
                     exit_index = j
 
                     break
@@ -611,16 +447,14 @@ def run_backtest(
                 if hit_target:
 
                     result = "WIN"
-
                     result_r = 2
-
                     exit_index = j
 
                     break
 
 
             # =================================================
-            # SHORT
+            # SHORT INVERTIDO
             # =================================================
 
             else:
@@ -629,18 +463,15 @@ def run_backtest(
                     high >= stop
                 )
 
-
                 hit_target = (
                     low <= target
                 )
 
-
+                # Criterio conservador
                 if hit_stop:
 
                     result = "LOSS"
-
                     result_r = -1
-
                     exit_index = j
 
                     break
@@ -649,9 +480,7 @@ def run_backtest(
                 if hit_target:
 
                     result = "WIN"
-
                     result_r = 2
-
                     exit_index = j
 
                     break
@@ -676,10 +505,9 @@ def run_backtest(
         trades.append(
             {
                 "datetime": current["datetime"],
+                "original_signal": original_signal,
                 "signal": signal,
                 "entry": entry,
-                "stop": stop,
-                "target": target,
                 "result": result,
                 "R": result_r
             }
@@ -693,9 +521,7 @@ def run_backtest(
         i = exit_index + 1
 
 
-    return pd.DataFrame(
-        trades
-    )
+    return pd.DataFrame(trades)
 
 
 # ============================================================
@@ -711,7 +537,6 @@ for period_number, end_date in enumerate(
 ):
 
     print()
-    print()
     print(
         "########################################"
     )
@@ -724,7 +549,6 @@ for period_number, end_date in enumerate(
         "########################################"
     )
 
-
     print()
 
     print(
@@ -733,12 +557,10 @@ for period_number, end_date in enumerate(
 
 
     # ========================================================
-    # DESCARGAR 5M
+    # DESCARGAR
     # ========================================================
 
-    df5 = download_data(
-        INTERVAL_5M,
-        OUTPUT_SIZE_5M,
+    df = download_data(
         end_date
     )
 
@@ -746,43 +568,22 @@ for period_number, end_date in enumerate(
     print()
 
     print(
-        "VELAS 5M:",
-        len(df5)
+        "VELAS OBTENIDAS:",
+        len(df)
     )
-
 
     print()
 
     print(
-        "DESDE 5M:",
-        df5["datetime"].iloc[0]
+        "DESDE:",
+        df["datetime"].iloc[0]
     )
-
 
     print()
 
     print(
-        "HASTA 5M:",
-        df5["datetime"].iloc[-1]
-    )
-
-
-    # ========================================================
-    # DESCARGAR 15M
-    # ========================================================
-
-    df15 = download_data(
-        INTERVAL_15M,
-        OUTPUT_SIZE_15M,
-        end_date
-    )
-
-
-    print()
-
-    print(
-        "VELAS 15M:",
-        len(df15)
+        "HASTA:",
+        df["datetime"].iloc[-1]
     )
 
 
@@ -791,8 +592,7 @@ for period_number, end_date in enumerate(
     # ========================================================
 
     results = run_backtest(
-        df5,
-        df15
+        df
     )
 
 
@@ -802,10 +602,6 @@ for period_number, end_date in enumerate(
         "INDICADORES CALCULADOS CORRECTAMENTE"
     )
 
-
-    # ========================================================
-    # RESULTADOS
-    # ========================================================
 
     if results.empty:
 
@@ -818,10 +614,13 @@ for period_number, end_date in enumerate(
         continue
 
 
+    # ========================================================
+    # RESULTADOS GENERALES
+    # ========================================================
+
     total_trades = len(
         results
     )
-
 
     winners = (
         results["result"]
@@ -829,13 +628,11 @@ for period_number, end_date in enumerate(
         "WIN"
     ).sum()
 
-
     losers = (
         results["result"]
         ==
         "LOSS"
     ).sum()
-
 
     win_rate = (
         winners
@@ -843,12 +640,10 @@ for period_number, end_date in enumerate(
         total_trades
     ) * 100
 
-
     total_r = (
         results["R"]
         .sum()
     )
-
 
     average_r = (
         results["R"]
@@ -859,10 +654,23 @@ for period_number, end_date in enumerate(
     print()
 
     print(
+        "========================="
+    )
+
+    print(
+        "RESULTADOS SEÑALES INVERTIDAS"
+    )
+
+    print(
+        "========================="
+    )
+
+    print()
+
+    print(
         "OPERACIONES:",
         total_trades
     )
-
 
     print()
 
@@ -871,7 +679,6 @@ for period_number, end_date in enumerate(
         winners
     )
 
-
     print()
 
     print(
@@ -879,20 +686,17 @@ for period_number, end_date in enumerate(
         losers
     )
 
-
     print()
 
     print(
         f"WIN RATE: {win_rate:.2f}%"
     )
 
-
     print()
 
     print(
         f"RESULTADO: {total_r:.2f} R"
     )
-
 
     print()
 
@@ -902,13 +706,12 @@ for period_number, end_date in enumerate(
 
 
     # ========================================================
-    # RESULTADOS LONG
+    # LONG INVERTIDO
     # ========================================================
 
     long_results = results[
         results["signal"] == "LONG"
     ]
-
 
     if not long_results.empty:
 
@@ -916,13 +719,11 @@ for period_number, end_date in enumerate(
             long_results
         )
 
-
         long_wins = (
             long_results["result"]
             ==
             "WIN"
         ).sum()
-
 
         long_losses = (
             long_results["result"]
@@ -930,24 +731,21 @@ for period_number, end_date in enumerate(
             "LOSS"
         ).sum()
 
-
         long_win_rate = (
             long_wins
             /
             long_total
         ) * 100
 
-
         long_r = (
             long_results["R"]
             .sum()
         )
 
-
         print()
 
         print(
-            "LONG:"
+            "LONG INVERTIDO:"
         )
 
         print(
@@ -972,13 +770,12 @@ for period_number, end_date in enumerate(
 
 
     # ========================================================
-    # RESULTADOS SHORT
+    # SHORT INVERTIDO
     # ========================================================
 
     short_results = results[
         results["signal"] == "SHORT"
     ]
-
 
     if not short_results.empty:
 
@@ -986,13 +783,11 @@ for period_number, end_date in enumerate(
             short_results
         )
 
-
         short_wins = (
             short_results["result"]
             ==
             "WIN"
         ).sum()
-
 
         short_losses = (
             short_results["result"]
@@ -1000,24 +795,21 @@ for period_number, end_date in enumerate(
             "LOSS"
         ).sum()
 
-
         short_win_rate = (
             short_wins
             /
             short_total
         ) * 100
 
-
         short_r = (
             short_results["R"]
             .sum()
         )
 
-
         print()
 
         print(
-            "SHORT:"
+            "SHORT INVERTIDO:"
         )
 
         print(
@@ -1070,7 +862,7 @@ print(
 )
 
 print(
-    "RESUMEN DE TODOS LOS PERIODOS"
+    "RESUMEN DE SEÑALES INVERTIDAS"
 )
 
 print(
@@ -1111,24 +903,15 @@ else:
         .sum()
     )
 
-
     total_winners = (
         summary["ganadoras"]
         .sum()
     )
 
-
     total_losers = (
         summary["perdedoras"]
         .sum()
     )
-
-
-    total_r = (
-        summary["R"]
-        .sum()
-    )
-
 
     combined_win_rate = (
         total_winners
@@ -1136,9 +919,13 @@ else:
         total_operations
     ) * 100
 
+    combined_r = (
+        summary["R"]
+        .sum()
+    )
 
     combined_average = (
-        total_r
+        combined_r
         /
         total_operations
     )
@@ -1158,14 +945,12 @@ else:
         "========================================"
     )
 
-
     print()
 
     print(
         "OPERACIONES:",
         total_operations
     )
-
 
     print()
 
@@ -1174,7 +959,6 @@ else:
         total_winners
     )
 
-
     print()
 
     print(
@@ -1182,20 +966,17 @@ else:
         total_losers
     )
 
-
     print()
 
     print(
         f"WIN RATE: {combined_win_rate:.2f}%"
     )
 
-
     print()
 
     print(
-        f"RESULTADO TOTAL: {total_r:.2f} R"
+        f"RESULTADO TOTAL: {combined_r:.2f} R"
     )
-
 
     print()
 
@@ -1203,4 +984,3 @@ else:
         f"PROMEDIO POR OPERACIÓN: "
         f"{combined_average:.3f} R"
     )
-
