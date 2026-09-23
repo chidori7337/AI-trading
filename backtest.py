@@ -18,7 +18,7 @@ OUTPUT_SIZE = 5000
 # 2. EMA20 vs EMA50
 # 3. EMA50 vs EMA200
 # 4. Estructura de 1 vela
-SCORE_THRESHOLD = 3
+SCORE_THRESHOLD = 4
 
 # Gestión de riesgo
 ATR_PERIOD = 14
