@@ -13,16 +13,13 @@ SYMBOL = "EUR/USD"
 INTERVAL = "5min"
 OUTPUT_SIZE = 5000
 
-# 4 condiciones:
+# Ahora usamos solamente 3 condiciones:
 # 1. Precio vs EMA20
 # 2. EMA20 vs EMA50
 # 3. EMA50 vs EMA200
-# 4. Pendiente EMA20
-SCORE_THRESHOLD = 4
-
-# Pendiente de EMA20:
-# comparamos EMA20 actual con EMA20 de hace 5 velas
-SLOPE_LOOKBACK = 5
+#
+# Por tanto exigimos las 3/3.
+SCORE_THRESHOLD = 3
 
 # Gestión de riesgo
 ATR_PERIOD = 14
@@ -54,6 +51,7 @@ params = {
     "format": "JSON"
 }
 
+
 response = requests.get(
     url,
     params=params,
@@ -64,10 +62,12 @@ response.raise_for_status()
 
 data = response.json()
 
+
 if "values" not in data:
     raise ValueError(
         f"Error descargando datos: {data}"
     )
+
 
 df = pd.DataFrame(
     data["values"]
@@ -81,6 +81,7 @@ df = pd.DataFrame(
 df["datetime"] = pd.to_datetime(
     df["datetime"]
 )
+
 
 for column in [
     "open",
@@ -250,9 +251,7 @@ print(
 
 trades = []
 
-# Necesitamos:
-# 200 velas para EMA200
-# 5 velas para la pendiente
+# Necesitamos suficiente historial para EMA200
 i = 200
 
 
@@ -270,25 +269,19 @@ while i < len(df) - 1:
 
     # 1. Precio por encima de EMA20
     if current["Close"] > current["EMA20"]:
+
         long_score += 1
 
 
     # 2. EMA20 por encima de EMA50
     if current["EMA20"] > current["EMA50"]:
+
         long_score += 1
 
 
     # 3. EMA50 por encima de EMA200
     if current["EMA50"] > current["EMA200"]:
-        long_score += 1
 
-
-    # 4. EMA20 subiendo respecto a hace 5 velas
-    if (
-        current["EMA20"]
-        >
-        df.iloc[i - SLOPE_LOOKBACK]["EMA20"]
-    ):
         long_score += 1
 
 
@@ -298,25 +291,19 @@ while i < len(df) - 1:
 
     # 1. Precio por debajo de EMA20
     if current["Close"] < current["EMA20"]:
+
         short_score += 1
 
 
     # 2. EMA20 por debajo de EMA50
     if current["EMA20"] < current["EMA50"]:
+
         short_score += 1
 
 
     # 3. EMA50 por debajo de EMA200
     if current["EMA50"] < current["EMA200"]:
-        short_score += 1
 
-
-    # 4. EMA20 bajando respecto a hace 5 velas
-    if (
-        current["EMA20"]
-        <
-        df.iloc[i - SLOPE_LOOKBACK]["EMA20"]
-    ):
         short_score += 1
 
 
@@ -434,9 +421,9 @@ while i < len(df) - 1:
             )
 
 
-            # Si toca ambos en la misma vela,
-            # usamos criterio conservador:
-            # contamos STOP primero.
+            # Criterio conservador:
+            # si toca ambos en la misma vela,
+            # contamos primero el STOP.
 
             if hit_stop:
 
@@ -475,6 +462,8 @@ while i < len(df) - 1:
                 low <= target
             )
 
+
+            # Criterio conservador
 
             if hit_stop:
 
@@ -913,3 +902,5 @@ else:
         .tail(10)
         .to_string(index=False)
     )
+
+
