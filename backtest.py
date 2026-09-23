@@ -13,22 +13,16 @@ SYMBOL = "EUR/USD"
 INTERVAL = "5min"
 OUTPUT_SIZE = 5000
 
-# Estrategia:
-# Tendencia + pullback a EMA20
-#
-# LONG:
-# 1. EMA20 > EMA50
-# 2. EMA50 > EMA200
-# 3. La vela toca EMA20
-# 4. Cierra por encima de EMA20
-#
-# SHORT:
-# 1. EMA20 < EMA50
-# 2. EMA50 < EMA200
-# 3. La vela toca EMA20
-# 4. Cierra por debajo de EMA20
-
+# 4 condiciones:
+# 1. Precio vs EMA20
+# 2. EMA20 vs EMA50
+# 3. EMA50 vs EMA200
+# 4. Pendiente EMA20
 SCORE_THRESHOLD = 4
+
+# Pendiente de EMA20:
+# comparamos EMA20 actual con EMA20 de hace 5 velas
+SLOPE_LOOKBACK = 5
 
 # Gestión de riesgo
 ATR_PERIOD = 14
@@ -60,7 +54,6 @@ params = {
     "format": "JSON"
 }
 
-
 response = requests.get(
     url,
     params=params,
@@ -71,12 +64,10 @@ response.raise_for_status()
 
 data = response.json()
 
-
 if "values" not in data:
     raise ValueError(
         f"Error descargando datos: {data}"
     )
-
 
 df = pd.DataFrame(
     data["values"]
@@ -90,7 +81,6 @@ df = pd.DataFrame(
 df["datetime"] = pd.to_datetime(
     df["datetime"]
 )
-
 
 for column in [
     "open",
@@ -260,13 +250,15 @@ print(
 
 trades = []
 
+# Necesitamos:
+# 200 velas para EMA200
+# 5 velas para la pendiente
 i = 200
 
 
 while i < len(df) - 1:
 
     current = df.iloc[i]
-
 
     long_score = 0
     short_score = 0
@@ -276,31 +268,27 @@ while i < len(df) - 1:
     # LONG
     # ========================================================
 
-    # 1. EMA20 > EMA50
-    if current["EMA20"] > current["EMA50"]:
-
-        long_score += 1
-
-
-    # 2. EMA50 > EMA200
-    if current["EMA50"] > current["EMA200"]:
-
-        long_score += 1
-
-
-    # 3. La vela toca EMA20
-    #
-    # El mínimo de la vela llega a EMA20 o por debajo.
-    if current["Low"] <= current["EMA20"]:
-
-        long_score += 1
-
-
-    # 4. La vela recupera EMA20
-    #
-    # El cierre termina por encima de EMA20.
+    # 1. Precio por encima de EMA20
     if current["Close"] > current["EMA20"]:
+        long_score += 1
 
+
+    # 2. EMA20 por encima de EMA50
+    if current["EMA20"] > current["EMA50"]:
+        long_score += 1
+
+
+    # 3. EMA50 por encima de EMA200
+    if current["EMA50"] > current["EMA200"]:
+        long_score += 1
+
+
+    # 4. EMA20 subiendo respecto a hace 5 velas
+    if (
+        current["EMA20"]
+        >
+        df.iloc[i - SLOPE_LOOKBACK]["EMA20"]
+    ):
         long_score += 1
 
 
@@ -308,31 +296,27 @@ while i < len(df) - 1:
     # SHORT
     # ========================================================
 
-    # 1. EMA20 < EMA50
-    if current["EMA20"] < current["EMA50"]:
-
-        short_score += 1
-
-
-    # 2. EMA50 < EMA200
-    if current["EMA50"] < current["EMA200"]:
-
-        short_score += 1
-
-
-    # 3. La vela toca EMA20
-    #
-    # El máximo de la vela llega a EMA20 o por encima.
-    if current["High"] >= current["EMA20"]:
-
-        short_score += 1
-
-
-    # 4. La vela pierde EMA20
-    #
-    # El cierre termina por debajo de EMA20.
+    # 1. Precio por debajo de EMA20
     if current["Close"] < current["EMA20"]:
+        short_score += 1
 
+
+    # 2. EMA20 por debajo de EMA50
+    if current["EMA20"] < current["EMA50"]:
+        short_score += 1
+
+
+    # 3. EMA50 por debajo de EMA200
+    if current["EMA50"] < current["EMA200"]:
+        short_score += 1
+
+
+    # 4. EMA20 bajando respecto a hace 5 velas
+    if (
+        current["EMA20"]
+        <
+        df.iloc[i - SLOPE_LOOKBACK]["EMA20"]
+    ):
         short_score += 1
 
 
@@ -450,9 +434,10 @@ while i < len(df) - 1:
             )
 
 
-            # Criterio conservador:
-            # si toca ambos en la misma vela,
-            # contamos primero el STOP.
+            # Si toca ambos en la misma vela,
+            # usamos criterio conservador:
+            # contamos STOP primero.
+
             if hit_stop:
 
                 result = "LOSS"
@@ -491,9 +476,6 @@ while i < len(df) - 1:
             )
 
 
-            # Criterio conservador:
-            # si toca ambos en la misma vela,
-            # contamos primero el STOP.
             if hit_stop:
 
                 result = "LOSS"
@@ -717,6 +699,12 @@ else:
         )
 
 
+        long_average_r = (
+            long_results["R"]
+            .mean()
+        )
+
+
         print()
 
         print(
@@ -772,6 +760,14 @@ else:
         )
 
 
+        print()
+
+        print(
+            f"PROMEDIO LONG: "
+            f"{long_average_r:.3f} R"
+        )
+
+
     # ========================================================
     # RESULTADOS SHORT
     # ========================================================
@@ -812,6 +808,12 @@ else:
         short_r = (
             short_results["R"]
             .sum()
+        )
+
+
+        short_average_r = (
+            short_results["R"]
+            .mean()
         )
 
 
@@ -867,6 +869,14 @@ else:
         print(
             f"RESULTADO SHORT: "
             f"{short_r:.2f} R"
+        )
+
+
+        print()
+
+        print(
+            f"PROMEDIO SHORT: "
+            f"{short_average_r:.3f} R"
         )
 
 
