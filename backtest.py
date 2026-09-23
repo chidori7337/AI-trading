@@ -11,24 +11,9 @@ API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 
 SYMBOL = "EUR/USD"
 INTERVAL = "5min"
+OUTPUT_SIZE = 5000
 
-# ============================================================
-# PERÍODO DE VALIDACIÓN
-# ============================================================
-#
-# Este período es distinto al utilizado para ajustar la
-# estrategia.
-#
-# Los datos de Forex de Twelve Data usan UTC por defecto.
-#
-START_DATE = "2026-08-17 00:00:00"
-END_DATE = "2026-09-05 23:55:00"
-
-# ============================================================
-# ESTRATEGIA CONGELADA
-# ============================================================
-
-# 4/4 condiciones
+# Estrategia congelada
 SCORE_THRESHOLD = 4
 
 # Gestión de riesgo
@@ -36,8 +21,11 @@ ATR_PERIOD = 14
 SL_ATR = 1.5
 TP_ATR = 3.0
 
-# Estructura de 1 vela
+# Estructura
 STRUCTURE_LOOKBACK = 1
+
+# Número de bloques de validación
+NUM_BLOCKS = 4
 
 
 # ============================================================
@@ -57,12 +45,10 @@ url = "https://api.twelvedata.com/time_series"
 params = {
     "symbol": SYMBOL,
     "interval": INTERVAL,
-    "start_date": START_DATE,
-    "end_date": END_DATE,
+    "outputsize": OUTPUT_SIZE,
     "apikey": API_KEY,
     "format": "JSON"
 }
-
 
 response = requests.get(
     url,
@@ -74,12 +60,10 @@ response.raise_for_status()
 
 data = response.json()
 
-
 if "values" not in data:
     raise ValueError(
         f"Error descargando datos: {data}"
     )
-
 
 df = pd.DataFrame(data["values"])
 
@@ -140,10 +124,6 @@ df.reset_index(
 )
 
 
-# ============================================================
-# INFORMACIÓN DE LOS DATOS
-# ============================================================
-
 print()
 print(
     "VELAS OBTENIDAS:",
@@ -166,17 +146,6 @@ print(
 
 
 # ============================================================
-# COMPROBAR QUE HAY SUFICIENTES DATOS
-# ============================================================
-
-if len(df) < 300:
-
-    raise ValueError(
-        "No hay suficientes velas para calcular EMA200 y realizar el backtest."
-    )
-
-
-# ============================================================
 # EMA
 # ============================================================
 
@@ -185,12 +154,10 @@ df["EMA20"] = df["Close"].ewm(
     adjust=False
 ).mean()
 
-
 df["EMA50"] = df["Close"].ewm(
     span=50,
     adjust=False
 ).mean()
-
 
 df["EMA200"] = df["Close"].ewm(
     span=200,
@@ -204,18 +171,15 @@ df["EMA200"] = df["Close"].ewm(
 
 previous_close = df["Close"].shift(1)
 
-
 tr1 = (
     df["High"]
     - df["Low"]
 )
 
-
 tr2 = (
     df["High"]
     - previous_close
 ).abs()
-
 
 tr3 = (
     df["Low"]
@@ -267,83 +231,123 @@ print(
 
 
 # ============================================================
+# PREPARAR BLOQUES
+# ============================================================
+
+# Necesitamos historial para EMA200.
+BACKTEST_START = 200
+
+if len(df) <= BACKTEST_START:
+    raise ValueError(
+        "No hay suficientes datos para realizar el backtest."
+    )
+
+
+available_candles = (
+    len(df) - BACKTEST_START
+)
+
+block_size = (
+    available_candles // NUM_BLOCKS
+)
+
+
+if block_size < 100:
+    raise ValueError(
+        "Los bloques son demasiado pequeños."
+    )
+
+
+def get_block(index):
+    """
+    Devuelve el bloque al que pertenece
+    una operación según su vela de entrada.
+    """
+
+    relative_index = index - BACKTEST_START
+
+    block = (
+        relative_index // block_size
+    ) + 1
+
+    if block > NUM_BLOCKS:
+        block = NUM_BLOCKS
+
+    return block
+
+
+# ============================================================
 # BACKTEST
 # ============================================================
 
 trades = []
 
-# Empezamos después de tener suficiente historial
-# para EMA200.
-i = 200
+i = BACKTEST_START
 
 
 while i < len(df) - 1:
 
     current = df.iloc[i]
 
-
-    # ========================================================
-    # SCORE SHORT
-    # ========================================================
-
+    long_score = 0
     short_score = 0
 
 
-    # --------------------------------------------------------
-    # 1. Precio por debajo de EMA20
-    # --------------------------------------------------------
+    # ========================================================
+    # LONG
+    # ========================================================
 
-    if (
-        current["Close"]
-        <
-        current["EMA20"]
-    ):
+    # 1. Precio por encima de EMA20
+    if current["Close"] > current["EMA20"]:
+        long_score += 1
 
-        short_score += 1
+    # 2. EMA20 por encima de EMA50
+    if current["EMA20"] > current["EMA50"]:
+        long_score += 1
 
+    # 3. EMA50 por encima de EMA200
+    if current["EMA50"] > current["EMA200"]:
+        long_score += 1
 
-    # --------------------------------------------------------
-    # 2. EMA20 por debajo de EMA50
-    # --------------------------------------------------------
-
-    if (
-        current["EMA20"]
-        <
-        current["EMA50"]
-    ):
-
-        short_score += 1
-
-
-    # --------------------------------------------------------
-    # 3. EMA50 por debajo de EMA200
-    # --------------------------------------------------------
-
-    if (
-        current["EMA50"]
-        <
-        current["EMA200"]
-    ):
-
-        short_score += 1
-
-
-    # --------------------------------------------------------
-    # 4. Estructura bajista de 1 vela
-    # --------------------------------------------------------
-
+    # 4. Estructura alcista de 1 vela
     if (
         current["High"]
-        <
-        df.iloc[i - 1]["High"]
+        > df.iloc[i - 1]["High"]
 
         and
 
         current["Low"]
-        <
-        df.iloc[i - 1]["Low"]
+        > df.iloc[i - 1]["Low"]
     ):
+        long_score += 1
 
+
+    # ========================================================
+    # SHORT
+    # ========================================================
+
+    # 1. Precio por debajo de EMA20
+    if current["Close"] < current["EMA20"]:
+        short_score += 1
+
+    # 2. EMA20 por debajo de EMA50
+    if current["EMA20"] < current["EMA50"]:
+        short_score += 1
+
+    # 3. EMA50 por debajo de EMA200
+    if current["EMA50"] < current["EMA200"]:
+        short_score += 1
+
+    # 4. Estructura bajista de 1 vela
+    if (
+        current["High"]
+        < df.iloc[i - 1]["High"]
+
+        and
+
+        current["Low"]
+        < df.iloc[i - 1]["Low"]
+    ):
         short_score += 1
 
 
@@ -351,13 +355,22 @@ while i < len(df) - 1:
     # DECIDIR SEÑAL
     # ========================================================
 
-    if short_score < SCORE_THRESHOLD:
+    signal = None
+
+    if long_score >= SCORE_THRESHOLD:
+
+        signal = "LONG"
+
+    elif short_score >= SCORE_THRESHOLD:
+
+        signal = "SHORT"
+
+
+    # Sin señal
+    if signal is None:
 
         i += 1
         continue
-
-
-    signal = "SHORT"
 
 
     # ========================================================
@@ -379,18 +392,33 @@ while i < len(df) - 1:
     # STOP Y TARGET
     # ========================================================
 
-    stop = (
-        entry
-        +
-        (SL_ATR * atr)
-    )
+    if signal == "LONG":
 
+        stop = (
+            entry
+            -
+            (SL_ATR * atr)
+        )
 
-    target = (
-        entry
-        -
-        (TP_ATR * atr)
-    )
+        target = (
+            entry
+            +
+            (TP_ATR * atr)
+        )
+
+    else:
+
+        stop = (
+            entry
+            +
+            (SL_ATR * atr)
+        )
+
+        target = (
+            entry
+            -
+            (TP_ATR * atr)
+        )
 
 
     # ========================================================
@@ -398,7 +426,9 @@ while i < len(df) - 1:
     # ========================================================
 
     result = None
+
     result_r = None
+
     exit_index = None
 
 
@@ -414,45 +444,81 @@ while i < len(df) - 1:
         low = future["Low"]
 
 
-        # ====================================================
+        # ----------------------------------------------------
+        # LONG
+        # ----------------------------------------------------
+
+        if signal == "LONG":
+
+            hit_stop = (
+                low <= stop
+            )
+
+            hit_target = (
+                high >= target
+            )
+
+
+            # Criterio conservador:
+            # si toca ambos, contamos STOP.
+            if hit_stop:
+
+                result = "LOSS"
+
+                result_r = -1
+
+                exit_index = j
+
+                break
+
+
+            if hit_target:
+
+                result = "WIN"
+
+                result_r = 2
+
+                exit_index = j
+
+                break
+
+
+        # ----------------------------------------------------
         # SHORT
-        # ====================================================
-
-        hit_stop = (
-            high >= stop
-        )
-
-
-        hit_target = (
-            low <= target
-        )
-
-
-        # ----------------------------------------------------
-        # Si toca ambos en la misma vela:
-        # criterio conservador = STOP primero
         # ----------------------------------------------------
 
-        if hit_stop:
+        else:
 
-            result = "LOSS"
+            hit_stop = (
+                high >= stop
+            )
 
-            result_r = -1
-
-            exit_index = j
-
-            break
+            hit_target = (
+                low <= target
+            )
 
 
-        if hit_target:
+            # Criterio conservador
+            if hit_stop:
 
-            result = "WIN"
+                result = "LOSS"
 
-            result_r = 2
+                result_r = -1
 
-            exit_index = j
+                exit_index = j
 
-            break
+                break
+
+
+            if hit_target:
+
+                result = "WIN"
+
+                result_r = 2
+
+                exit_index = j
+
+                break
 
 
         j += 1
@@ -479,7 +545,8 @@ while i < len(df) - 1:
             "stop": stop,
             "target": target,
             "result": result,
-            "R": result_r
+            "R": result_r,
+            "block": get_block(i)
         }
     )
 
@@ -500,41 +567,39 @@ results = pd.DataFrame(trades)
 
 print()
 print("=========================")
-print("VALIDACIÓN SOLO SHORT")
+print("RESULTADOS POR BLOQUE")
 print("=========================")
 
 
 if results.empty:
 
     print()
-    print("No se encontraron operaciones.")
+    print(
+        "No se encontraron operaciones."
+    )
     print()
 
 else:
 
     # ========================================================
-    # RESULTADOS GENERALES
+    # RESULTADO TOTAL
     # ========================================================
 
     total_trades = len(results)
 
-
-    winners = (
+    total_wins = (
         results["result"]
-        ==
-        "WIN"
+        == "WIN"
+    ).sum()
+
+    total_losses = (
+        results["result"]
+        == "LOSS"
     ).sum()
 
 
-    losers = (
-        results["result"]
-        ==
-        "LOSS"
-    ).sum()
-
-
-    win_rate = (
-        winners
+    total_win_rate = (
+        total_wins
         /
         total_trades
     ) * 100
@@ -546,37 +611,186 @@ else:
     )
 
 
-    average_r = (
+    total_average_r = (
         results["R"]
         .mean()
     )
 
 
+    # ========================================================
+    # CADA BLOQUE
+    # ========================================================
+
+    positive_blocks = 0
+
+    negative_blocks = 0
+
+
+    for block in range(
+        1,
+        NUM_BLOCKS + 1
+    ):
+
+        block_results = results[
+            results["block"] == block
+        ]
+
+
+        print()
+
+        print(
+            "-------------------------"
+        )
+
+        print(
+            f"BLOQUE {block}"
+        )
+
+        print(
+            "-------------------------"
+        )
+
+
+        if block_results.empty:
+
+            print(
+                "Sin operaciones."
+            )
+
+            continue
+
+
+        block_trades = len(
+            block_results
+        )
+
+
+        block_wins = (
+            block_results["result"]
+            == "WIN"
+        ).sum()
+
+
+        block_losses = (
+            block_results["result"]
+            == "LOSS"
+        ).sum()
+
+
+        block_win_rate = (
+            block_wins
+            /
+            block_trades
+        ) * 100
+
+
+        block_r = (
+            block_results["R"]
+            .sum()
+        )
+
+
+        block_average_r = (
+            block_results["R"]
+            .mean()
+        )
+
+
+        block_start = (
+            block_results["datetime"]
+            .iloc[0]
+        )
+
+
+        block_end = (
+            block_results["datetime"]
+            .iloc[-1]
+        )
+
+
+        print(
+            f"DESDE: {block_start}"
+        )
+
+        print(
+            f"HASTA: {block_end}"
+        )
+
+        print(
+            f"OPERACIONES: {block_trades}"
+        )
+
+        print(
+            f"GANADORAS: {block_wins}"
+        )
+
+        print(
+            f"PERDEDORAS: {block_losses}"
+        )
+
+        print(
+            f"WIN RATE: {block_win_rate:.2f}%"
+        )
+
+        print(
+            f"RESULTADO: {block_r:.2f} R"
+        )
+
+        print(
+            f"PROMEDIO: {block_average_r:.3f} R"
+        )
+
+
+        if block_r > 0:
+
+            positive_blocks += 1
+
+        elif block_r < 0:
+
+            negative_blocks += 1
+
+
+    # ========================================================
+    # RESULTADO TOTAL
+    # ========================================================
+
     print()
 
     print(
-        "OPERACIONES:",
-        total_trades
+        "========================="
+    )
+
+    print(
+        "RESULTADO TOTAL"
+    )
+
+    print(
+        "========================="
+    )
+
+
+    print()
+
+    print(
+        f"OPERACIONES: {total_trades}"
     )
 
     print()
 
     print(
-        "GANADORAS:",
-        winners
+        f"GANADORAS: {total_wins}"
     )
 
     print()
 
     print(
-        "PERDEDORAS:",
-        losers
+        f"PERDEDORAS: {total_losses}"
     )
 
     print()
 
     print(
-        f"WIN RATE: {win_rate:.2f}%"
+        f"WIN RATE: {total_win_rate:.2f}%"
     )
 
     print()
@@ -588,36 +802,22 @@ else:
     print()
 
     print(
-        f"PROMEDIO POR OPERACIÓN: {average_r:.3f} R"
-    )
-
-
-    # ========================================================
-    # RESULTADOS POR PERÍODO
-    # ========================================================
-
-    print()
-
-    print("=========================")
-
-    print(
-        "PERÍODO VALIDADO"
-    )
-
-    print("=========================")
-
-    print()
-
-    print(
-        "DESDE:",
-        results["datetime"].iloc[0]
+        f"PROMEDIO POR OPERACIÓN: "
+        f"{total_average_r:.3f} R"
     )
 
     print()
 
     print(
-        "HASTA:",
-        results["datetime"].iloc[-1]
+        f"BLOQUES POSITIVOS: "
+        f"{positive_blocks}"
+    )
+
+    print()
+
+    print(
+        f"BLOQUES NEGATIVOS: "
+        f"{negative_blocks}"
     )
 
 
@@ -627,13 +827,17 @@ else:
 
     print()
 
-    print("=========================")
+    print(
+        "========================="
+    )
 
     print(
         "ÚLTIMAS OPERACIONES"
     )
 
-    print("=========================")
+    print(
+        "========================="
+    )
 
     print()
 
@@ -644,7 +848,8 @@ else:
                 "signal",
                 "entry",
                 "result",
-                "R"
+                "R",
+                "block"
             ]
         ]
         .tail(10)
