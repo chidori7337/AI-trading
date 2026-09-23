@@ -22,8 +22,10 @@ PERIODS = [
 
 FILTERS = {
     "SIN FILTRO": 0.0,
+    "0.25 ATR": 0.25,
     "0.5 ATR": 0.5,
 }
+
 
 
 def download_data(end_date):
