@@ -27,7 +27,14 @@ TP_ATR = 3.0
 
 BODY_ATR_FILTER = 0.25
 
-# Enero - Septiembre 2025
+# Costes que vamos a probar
+COSTS_PIPS = [0.0, 0.5, 1.0, 1.5, 2.0]
+
+# EUR/USD:
+# 1 pip = 0.0001
+PIP_SIZE = 0.0001
+
+# Todo 2025
 PERIODS = [
     ("ENERO 2025", "2025-01-31 23:55:00"),
     ("FEBRERO 2025", "2025-02-28 23:55:00"),
@@ -38,13 +45,18 @@ PERIODS = [
     ("JULIO 2025", "2025-07-31 23:55:00"),
     ("AGOSTO 2025", "2025-08-31 23:55:00"),
     ("SEPTIEMBRE 2025", "2025-09-30 23:55:00"),
+    ("OCTUBRE 2025", "2025-10-31 23:55:00"),
+    ("NOVIEMBRE 2025", "2025-11-30 23:55:00"),
+    ("DICIEMBRE 2025", "2025-12-31 23:55:00"),
 ]
+
 
 # ============================================================
 # DESCARGAR DATOS
 # ============================================================
 
 def get_data(end_date):
+
     url = "https://api.twelvedata.com/time_series"
 
     params = {
@@ -59,12 +71,24 @@ def get_data(end_date):
     max_retries = 5
 
     for attempt in range(max_retries):
+
         try:
-            response = requests.get(url, params=params, timeout=30)
+
+            response = requests.get(
+                url,
+                params=params,
+                timeout=30
+            )
 
             if response.status_code == 429:
+
                 wait = 30 * (attempt + 1)
-                print(f"Rate limit (429). Esperando {wait} segundos...")
+
+                print(
+                    f"Rate limit (429). "
+                    f"Esperando {wait} segundos..."
+                )
+
                 time.sleep(wait)
                 continue
 
@@ -73,31 +97,59 @@ def get_data(end_date):
             data = response.json()
 
             if "values" not in data:
+
                 print("Respuesta de Twelve Data:")
                 print(data)
-                raise ValueError("No se recibieron velas.")
+
+                raise ValueError(
+                    "No se recibieron velas."
+                )
 
             df = pd.DataFrame(data["values"])
 
-            df["datetime"] = pd.to_datetime(df["datetime"])
+            df["datetime"] = pd.to_datetime(
+                df["datetime"]
+            )
 
-            for col in ["open", "high", "low", "close"]:
-                df[col] = pd.to_numeric(df[col])
+            for col in [
+                "open",
+                "high",
+                "low",
+                "close"
+            ]:
 
-            df = df.sort_values("datetime").reset_index(drop=True)
+                df[col] = pd.to_numeric(
+                    df[col]
+                )
+
+            df = (
+                df
+                .sort_values("datetime")
+                .reset_index(drop=True)
+            )
 
             return df
 
         except requests.RequestException as e:
+
             if attempt == max_retries - 1:
                 raise
 
             wait = 10 * (attempt + 1)
-            print(f"Error de conexión: {e}")
-            print(f"Reintentando en {wait} segundos...")
+
+            print(
+                f"Error de conexión: {e}"
+            )
+
+            print(
+                f"Reintentando en {wait} segundos..."
+            )
+
             time.sleep(wait)
 
-    raise RuntimeError("No se pudieron obtener los datos.")
+    raise RuntimeError(
+        "No se pudieron obtener los datos."
+    )
 
 
 # ============================================================
@@ -126,18 +178,26 @@ def calculate_indicators(df):
     previous_close = df["close"].shift(1)
 
     tr1 = df["high"] - df["low"]
-    tr2 = abs(df["high"] - previous_close)
-    tr3 = abs(df["low"] - previous_close)
+
+    tr2 = abs(
+        df["high"] - previous_close
+    )
+
+    tr3 = abs(
+        df["low"] - previous_close
+    )
 
     df["tr"] = pd.concat(
         [tr1, tr2, tr3],
         axis=1
     ).max(axis=1)
 
-    # MISMA FÓRMULA UTILIZADA EN LA PRUEBA A/B
-    df["atr"] = df["tr"].rolling(
-        ATR_PERIOD
-    ).mean()
+    # MISMA FÓRMULA DE LAS PRUEBAS ANTERIORES
+    df["atr"] = (
+        df["tr"]
+        .rolling(ATR_PERIOD)
+        .mean()
+    )
 
     return df
 
@@ -172,7 +232,7 @@ def get_original_signal(row):
 
 
 # ============================================================
-# GENERAR CANDIDATAS
+# CANDIDATAS
 # ============================================================
 
 def generate_candidates(df):
@@ -190,8 +250,7 @@ def generate_candidates(df):
         if signal1 is None:
             continue
 
-        # CONFIRMACIÓN:
-        # La misma señal debe mantenerse en la siguiente vela
+        # Confirmación de una vela
         if signal1 != signal2:
             continue
 
@@ -200,25 +259,23 @@ def generate_candidates(df):
         if pd.isna(atr) or atr <= 0:
             continue
 
-        # CUERPO DE LA VELA DE CONFIRMACIÓN
-        body = abs(row2["close"] - row2["open"])
+        # Cuerpo de la vela de confirmación
+        body = abs(
+            row2["close"] - row2["open"]
+        )
 
         body_ratio = body / atr
 
         if body_ratio < BODY_ATR_FILTER:
             continue
 
-        # ====================================================
-        # INVERSIÓN DE LA SEÑAL
-        # ====================================================
-
+        # INVERTIMOS LA SEÑAL
         if signal1 == "LONG":
             actual_direction = "SHORT"
         else:
             actual_direction = "LONG"
 
         candidates.append({
-            "signal_index": i,
             "entry_index": i + 1,
             "direction": actual_direction,
             "atr": atr,
@@ -228,7 +285,7 @@ def generate_candidates(df):
 
 
 # ============================================================
-# SIMULACIÓN
+# SIMULAR OPERACIONES
 # ============================================================
 
 def simulate(df, candidates):
@@ -241,71 +298,89 @@ def simulate(df, candidates):
 
         entry_index = candidate["entry_index"]
 
-        # Solo una operación abierta a la vez
+        # Una sola operación a la vez
         if entry_index < next_available_index:
             continue
 
         direction = candidate["direction"]
         atr = candidate["atr"]
 
-        entry_price = df.iloc[entry_index]["close"]
+        entry_price = df.iloc[
+            entry_index
+        ]["close"]
 
         if direction == "LONG":
 
-            stop = entry_price - SL_ATR * atr
-            target = entry_price + TP_ATR * atr
+            stop = (
+                entry_price
+                - SL_ATR * atr
+            )
+
+            target = (
+                entry_price
+                + TP_ATR * atr
+            )
 
         else:
 
-            stop = entry_price + SL_ATR * atr
-            target = entry_price - TP_ATR * atr
+            stop = (
+                entry_price
+                + SL_ATR * atr
+            )
+
+            target = (
+                entry_price
+                - TP_ATR * atr
+            )
 
         result = None
         exit_index = None
-        exit_price = None
 
-        # Buscar salida
-        for j in range(entry_index + 1, len(df)):
+        for j in range(
+            entry_index + 1,
+            len(df)
+        ):
 
             high = df.iloc[j]["high"]
             low = df.iloc[j]["low"]
 
             if direction == "LONG":
 
-                # Conservador:
-                # si toca SL y TP en la misma vela,
-                # contamos STOP primero.
+                # STOP primero si toca ambos
                 if low <= stop:
+
                     result = -1.0
                     exit_index = j
-                    exit_price = stop
+
                     break
 
                 if high >= target:
+
                     result = 2.0
                     exit_index = j
-                    exit_price = target
+
                     break
 
             else:
 
                 if high >= stop:
+
                     result = -1.0
                     exit_index = j
-                    exit_price = stop
+
                     break
 
                 if low <= target:
+
                     result = 2.0
                     exit_index = j
-                    exit_price = target
+
                     break
 
-        # Si no encontró salida, no contamos la operación
         if result is None:
             continue
 
-        duration_minutes = (
+        duration = (
             df.iloc[exit_index]["datetime"]
             - df.iloc[entry_index]["datetime"]
         ).total_seconds() / 60
@@ -314,13 +389,13 @@ def simulate(df, candidates):
             "entry_index": entry_index,
             "exit_index": exit_index,
             "direction": direction,
-            "entry_price": entry_price,
-            "exit_price": exit_price,
             "result_R": result,
-            "duration_min": duration_minutes,
+            "duration_min": duration,
         })
 
-        next_available_index = exit_index + 1
+        next_available_index = (
+            exit_index + 1
+        )
 
     return trades
 
@@ -329,172 +404,139 @@ def simulate(df, candidates):
 # ESTADÍSTICAS
 # ============================================================
 
-def calculate_stats(trades):
+def calculate_stats(results):
 
-    if not trades:
+    if not results:
+
         return {
             "ops": 0,
             "wins": 0,
             "losses": 0,
             "win_rate": 0,
-            "total_R": 0,
+            "R": 0,
             "avg_R": 0,
-            "max_dd": 0,
-            "worst_streak": 0,
-            "profit_factor": 0,
-            "avg_duration": 0,
+            "DD": 0,
+            "streak": 0,
+            "PF": 0,
         }
 
-    results = [t["result_R"] for t in trades]
+    wins = sum(
+        r > 0 for r in results
+    )
 
-    wins = sum(r > 0 for r in results)
-    losses = sum(r < 0 for r in results)
+    losses = sum(
+        r < 0 for r in results
+    )
 
     total_R = sum(results)
 
-    win_rate = wins / len(results) * 100
+    win_rate = (
+        wins / len(results) * 100
+    )
 
-    avg_R = total_R / len(results)
+    avg_R = (
+        total_R / len(results)
+    )
 
-    # Equity y drawdown
     equity = np.cumsum(results)
+
     running_max = np.maximum.accumulate(
         np.insert(equity, 0, 0)
     )[1:]
 
-    drawdowns = equity - running_max
+    drawdowns = (
+        equity - running_max
+    )
+
     max_dd = drawdowns.min()
 
-    # Peor racha de pérdidas
     worst_streak = 0
     current_streak = 0
 
     for r in results:
 
         if r < 0:
+
             current_streak += 1
+
             worst_streak = max(
                 worst_streak,
                 current_streak
             )
+
         else:
+
             current_streak = 0
 
     gross_profit = sum(
-        r for r in results if r > 0
+        r for r in results
+        if r > 0
     )
 
     gross_loss = abs(sum(
-        r for r in results if r < 0
+        r for r in results
+        if r < 0
     ))
 
     if gross_loss > 0:
-        profit_factor = gross_profit / gross_loss
+
+        profit_factor = (
+            gross_profit / gross_loss
+        )
+
     else:
+
         profit_factor = float("inf")
 
-    avg_duration = np.mean([
-        t["duration_min"]
-        for t in trades
-    ])
-
     return {
-        "ops": len(trades),
+        "ops": len(results),
         "wins": wins,
         "losses": losses,
         "win_rate": win_rate,
-        "total_R": total_R,
+        "R": total_R,
         "avg_R": avg_R,
-        "max_dd": max_dd,
-        "worst_streak": worst_streak,
-        "profit_factor": profit_factor,
-        "avg_duration": avg_duration,
+        "DD": max_dd,
+        "streak": worst_streak,
+        "PF": profit_factor,
     }
 
 
 # ============================================================
-# EJECUCIÓN DE UN PERÍODO
+# APLICAR COSTES
 # ============================================================
 
-def run_period(name, end_date):
+def apply_costs(trades, cost_pips):
 
-    print("\n" + "=" * 50)
-    print(name)
-    print("=" * 50)
+    # Cada operación paga el coste completo.
+    # El coste se expresa como una fracción de R
+    # calculada respecto al riesgo de 1.5 ATR.
 
-    df = get_data(end_date)
+    adjusted_results = []
 
-    print(
-        f"VELAS OBTENIDAS: {len(df)}"
-    )
+    for trade in trades:
 
-    print(
-        f"DESDE: {df['datetime'].iloc[0]}"
-    )
+        # El coste en precio
+        cost_price = (
+            cost_pips * PIP_SIZE
+        )
 
-    print(
-        f"HASTA: {df['datetime'].iloc[-1]}"
-    )
+        # Para reconstruir el ATR necesitamos
+        # conservarlo. Lo añadimos posteriormente.
+        risk_price = trade["risk_price"]
 
-    df = calculate_indicators(df)
+        cost_R = (
+            cost_price / risk_price
+        )
 
-    candidates = generate_candidates(df)
+        adjusted_R = (
+            trade["result_R"] - cost_R
+        )
 
-    print(
-        f"CANDIDATAS 0.25 ATR: {len(candidates)}"
-    )
+        adjusted_results.append(
+            adjusted_R
+        )
 
-    trades = simulate(
-        df,
-        candidates
-    )
-
-    stats = calculate_stats(trades)
-
-    print("\nRESULTADOS")
-    print("-----------------------------------")
-
-    print(
-        f"OPERACIONES: {stats['ops']}"
-    )
-
-    print(
-        f"GANADORAS: {stats['wins']}"
-    )
-
-    print(
-        f"PERDEDORAS: {stats['losses']}"
-    )
-
-    print(
-        f"WIN RATE: {stats['win_rate']:.2f}%"
-    )
-
-    print(
-        f"R TOTAL: {stats['total_R']:.2f}"
-    )
-
-    print(
-        f"R MEDIO: {stats['avg_R']:.3f}"
-    )
-
-    print(
-        f"DRAWDOWN MÁXIMO: {stats['max_dd']:.2f} R"
-    )
-
-    print(
-        f"PEOR RACHA: {stats['worst_streak']}"
-    )
-
-    print(
-        f"PROFIT FACTOR: {stats['profit_factor']:.3f}"
-    )
-
-    print(
-        f"DURACIÓN MEDIA: {stats['avg_duration']:.1f} min"
-    )
-
-    return stats
+    return adjusted_results
 
 
 # ============================================================
@@ -503,64 +545,320 @@ def run_period(name, end_date):
 
 def main():
 
-    print("\n")
+    print()
     print("=" * 60)
-    print("VALIDACIÓN FUERA DE MUESTRA 2025")
-    print("ESTRATEGIA 0.25 ATR")
+    print("PRUEBA DE COSTES - TODO 2025")
     print("=" * 60)
 
-    print("\nCONFIGURACIÓN CONGELADA:")
-    print("EMA: 20 / 50 / 200")
-    print("SEÑAL: 4/4")
-    print("INVERSIÓN: ACTIVADA")
-    print("CONFIRMACIÓN: 1 VELA")
-    print("FILTRO CUERPO: 0.25 ATR")
-    print("SL: 1.5 ATR")
-    print("TP: 3 ATR")
+    print()
+    print("ESTRATEGIA CONGELADA:")
+    print("EMA 20 / 50 / 200")
+    print("SEÑAL 4/4")
+    print("INVERSIÓN ACTIVADA")
+    print("CONFIRMACIÓN 1 VELA")
+    print("FILTRO CUERPO 0.25 ATR")
+    print("SL 1.5 ATR")
+    print("TP 3 ATR")
     print("UNA OPERACIÓN A LA VEZ")
 
     all_trades = []
 
-    period_results = []
+    # ========================================================
+    # DESCARGAR Y SIMULAR TODO 2025
+    # ========================================================
 
     for index, (name, end_date) in enumerate(PERIODS):
 
-        stats = run_period(
-            name,
-            end_date
+        print()
+        print("=" * 50)
+        print(name)
+        print("=" * 50)
+
+        df = get_data(end_date)
+
+        print(
+            f"VELAS: {len(df)}"
         )
 
-        period_results.append({
-            "periodo": name,
-            "operaciones": stats["ops"],
-            "R": stats["total_R"],
-            "win_rate": stats["win_rate"],
-            "DD": stats["max_dd"],
-            "racha": stats["worst_streak"],
-            "PF": stats["profit_factor"],
-        })
+        df = calculate_indicators(df)
 
-        # Evitar rate limit de Twelve Data
+        candidates = generate_candidates(df)
+
+        trades = simulate(
+            df,
+            candidates
+        )
+
+        # Guardamos el riesgo real de cada operación
+        # para poder convertir costes de pips a R.
+        for trade, candidate in zip(
+            trades,
+            []
+        ):
+            pass
+
+        # Rehacemos la simulación conservando ATR/riesgo
+        # directamente para los costes.
+        all_period_trades = []
+
+        next_available_index = 0
+
+        for candidate in candidates:
+
+            entry_index = candidate[
+                "entry_index"
+            ]
+
+            if entry_index < next_available_index:
+                continue
+
+            direction = candidate[
+                "direction"
+            ]
+
+            atr = candidate["atr"]
+
+            entry_price = df.iloc[
+                entry_index
+            ]["close"]
+
+            if direction == "LONG":
+
+                stop = (
+                    entry_price
+                    - SL_ATR * atr
+                )
+
+                target = (
+                    entry_price
+                    + TP_ATR * atr
+                )
+
+            else:
+
+                stop = (
+                    entry_price
+                    + SL_ATR * atr
+                )
+
+                target = (
+                    entry_price
+                    - TP_ATR * atr
+                )
+
+            result = None
+            exit_index = None
+
+            for j in range(
+                entry_index + 1,
+                len(df)
+            ):
+
+                high = df.iloc[j]["high"]
+                low = df.iloc[j]["low"]
+
+                if direction == "LONG":
+
+                    if low <= stop:
+
+                        result = -1.0
+                        exit_index = j
+                        break
+
+                    if high >= target:
+
+                        result = 2.0
+                        exit_index = j
+                        break
+
+                else:
+
+                    if high >= stop:
+
+                        result = -1.0
+                        exit_index = j
+                        break
+
+                    if low <= target:
+
+                        result = 2.0
+                        exit_index = j
+                        break
+
+            if result is None:
+                continue
+
+            all_period_trades.append({
+                "result_R": result,
+                "risk_price": SL_ATR * atr,
+            })
+
+            next_available_index = (
+                exit_index + 1
+            )
+
+        all_trades.extend(
+            all_period_trades
+        )
+
+        print(
+            f"OPERACIONES: "
+            f"{len(all_period_trades)}"
+        )
+
         if index < len(PERIODS) - 1:
-            print("\nEsperando 20 segundos...")
+
+            print(
+                "Esperando 20 segundos..."
+            )
+
             time.sleep(20)
 
     # ========================================================
-    # RESUMEN
+    # RESULTADOS
     # ========================================================
 
-    print("\n")
+    print()
     print("=" * 60)
-    print("RESUMEN ENERO-SEPTIEMBRE 2025")
+    print("RESULTADOS BRUTOS")
     print("=" * 60)
 
-    summary = pd.DataFrame(period_results)
+    gross_results = [
+        t["result_R"]
+        for t in all_trades
+    ]
 
-    print(summary.to_string(index=False))
+    gross_stats = calculate_stats(
+        gross_results
+    )
 
-    print("\n")
+    print(
+        f"OPERACIONES: {gross_stats['ops']}"
+    )
+
+    print(
+        f"WIN RATE: "
+        f"{gross_stats['win_rate']:.2f}%"
+    )
+
+    print(
+        f"R TOTAL: "
+        f"{gross_stats['R']:.2f}"
+    )
+
+    print(
+        f"R MEDIO: "
+        f"{gross_stats['avg_R']:.3f}"
+    )
+
+    print(
+        f"DRAWDOWN: "
+        f"{gross_stats['DD']:.2f} R"
+    )
+
+    print(
+        f"PEOR RACHA: "
+        f"{gross_stats['streak']}"
+    )
+
+    print(
+        f"PROFIT FACTOR: "
+        f"{gross_stats['PF']:.3f}"
+    )
+
+    # ========================================================
+    # COSTES
+    # ========================================================
+
+    print()
     print("=" * 60)
-    print("FIN DE LA VALIDACIÓN")
+    print("SENSIBILIDAD A COSTES")
+    print("=" * 60)
+
+    cost_results = []
+
+    for cost_pips in COSTS_PIPS:
+
+        results = []
+
+        for trade in all_trades:
+
+            cost_price = (
+                cost_pips * PIP_SIZE
+            )
+
+            cost_R = (
+                cost_price
+                / trade["risk_price"]
+            )
+
+            adjusted_R = (
+                trade["result_R"]
+                - cost_R
+            )
+
+            results.append(
+                adjusted_R
+            )
+
+        stats = calculate_stats(
+            results
+        )
+
+        cost_results.append({
+            "cost_pips": cost_pips,
+            "ops": stats["ops"],
+            "win_rate": stats["win_rate"],
+            "R": stats["R"],
+            "avg_R": stats["avg_R"],
+            "DD": stats["DD"],
+            "streak": stats["streak"],
+            "PF": stats["PF"],
+        })
+
+        print()
+        print(
+            f"COSTE: {cost_pips:.1f} pips"
+        )
+
+        print(
+            f"R TOTAL: {stats['R']:.2f}"
+        )
+
+        print(
+            f"R MEDIO: {stats['avg_R']:.3f}"
+        )
+
+        print(
+            f"DRAWDOWN: {stats['DD']:.2f} R"
+        )
+
+        print(
+            f"PROFIT FACTOR: {stats['PF']:.3f}"
+        )
+
+    # ========================================================
+    # TABLA FINAL
+    # ========================================================
+
+    print()
+    print("=" * 60)
+    print("TABLA FINAL DE COSTES")
+    print("=" * 60)
+
+    df_results = pd.DataFrame(
+        cost_results
+    )
+
+    print(
+        df_results.to_string(
+            index=False
+        )
+    )
+
+    print()
+    print("=" * 60)
+    print("FIN")
     print("=" * 60)
 
 
