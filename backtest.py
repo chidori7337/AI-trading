@@ -27,14 +27,6 @@ TP_ATR = 3.0
 
 BODY_ATR_FILTER = 0.25
 
-# Costes que vamos a probar
-COSTS_PIPS = [0.0, 0.5, 1.0, 1.5, 2.0]
-
-# EUR/USD:
-# 1 pip = 0.0001
-PIP_SIZE = 0.0001
-
-# Todo 2025
 PERIODS = [
     ("ENERO 2025", "2025-01-31 23:55:00"),
     ("FEBRERO 2025", "2025-02-28 23:55:00"),
@@ -52,7 +44,7 @@ PERIODS = [
 
 
 # ============================================================
-# DESCARGAR DATOS
+# DATOS
 # ============================================================
 
 def get_data(end_date):
@@ -68,9 +60,7 @@ def get_data(end_date):
         "format": "JSON",
     }
 
-    max_retries = 5
-
-    for attempt in range(max_retries):
+    for attempt in range(5):
 
         try:
 
@@ -85,7 +75,7 @@ def get_data(end_date):
                 wait = 30 * (attempt + 1)
 
                 print(
-                    f"Rate limit (429). "
+                    f"Rate limit 429. "
                     f"Esperando {wait} segundos..."
                 )
 
@@ -98,11 +88,10 @@ def get_data(end_date):
 
             if "values" not in data:
 
-                print("Respuesta de Twelve Data:")
                 print(data)
 
                 raise ValueError(
-                    "No se recibieron velas."
+                    "Twelve Data no devolvió velas."
                 )
 
             df = pd.DataFrame(data["values"])
@@ -117,7 +106,6 @@ def get_data(end_date):
                 "low",
                 "close"
             ]:
-
                 df[col] = pd.to_numeric(
                     df[col]
                 )
@@ -132,15 +120,12 @@ def get_data(end_date):
 
         except requests.RequestException as e:
 
-            if attempt == max_retries - 1:
+            if attempt == 4:
                 raise
 
             wait = 10 * (attempt + 1)
 
-            print(
-                f"Error de conexión: {e}"
-            )
-
+            print(f"Error: {e}")
             print(
                 f"Reintentando en {wait} segundos..."
             )
@@ -148,7 +133,7 @@ def get_data(end_date):
             time.sleep(wait)
 
     raise RuntimeError(
-        "No se pudieron obtener los datos."
+        "No se pudieron descargar los datos."
     )
 
 
@@ -192,18 +177,26 @@ def calculate_indicators(df):
         axis=1
     ).max(axis=1)
 
-    # MISMA FÓRMULA DE LAS PRUEBAS ANTERIORES
     df["atr"] = (
         df["tr"]
         .rolling(ATR_PERIOD)
         .mean()
     )
 
+    # Pendientes simples de EMA
+    df["ema20_slope"] = (
+        df["ema20"] - df["ema20"].shift(1)
+    )
+
+    df["ema50_slope"] = (
+        df["ema50"] - df["ema50"].shift(1)
+    )
+
     return df
 
 
 # ============================================================
-# SEÑAL ORIGINAL 4/4
+# SEÑAL ORIGINAL
 # ============================================================
 
 def get_original_signal(row):
@@ -232,7 +225,7 @@ def get_original_signal(row):
 
 
 # ============================================================
-# CANDIDATAS
+# GENERAR CANDIDATAS
 # ============================================================
 
 def generate_candidates(df):
@@ -250,7 +243,7 @@ def generate_candidates(df):
         if signal1 is None:
             continue
 
-        # Confirmación de una vela
+        # Confirmación
         if signal1 != signal2:
             continue
 
@@ -259,25 +252,24 @@ def generate_candidates(df):
         if pd.isna(atr) or atr <= 0:
             continue
 
-        # Cuerpo de la vela de confirmación
         body = abs(
             row2["close"] - row2["open"]
         )
 
-        body_ratio = body / atr
+        body_atr = body / atr
 
-        if body_ratio < BODY_ATR_FILTER:
+        if body_atr < BODY_ATR_FILTER:
             continue
 
-        # INVERTIMOS LA SEÑAL
+        # Inversión de la señal
         if signal1 == "LONG":
-            actual_direction = "SHORT"
+            direction = "SHORT"
         else:
-            actual_direction = "LONG"
+            direction = "LONG"
 
         candidates.append({
             "entry_index": i + 1,
-            "direction": actual_direction,
+            "direction": direction,
             "atr": atr,
         })
 
@@ -285,7 +277,7 @@ def generate_candidates(df):
 
 
 # ============================================================
-# SIMULAR OPERACIONES
+# SIMULACIÓN + CARACTERÍSTICAS
 # ============================================================
 
 def simulate(df, candidates):
@@ -298,16 +290,64 @@ def simulate(df, candidates):
 
         entry_index = candidate["entry_index"]
 
-        # Una sola operación a la vez
         if entry_index < next_available_index:
             continue
+
+        row = df.iloc[entry_index]
 
         direction = candidate["direction"]
         atr = candidate["atr"]
 
-        entry_price = df.iloc[
-            entry_index
-        ]["close"]
+        entry_price = row["close"]
+
+        # --------------------------------------------
+        # CARACTERÍSTICAS DE LA ENTRADA
+        # --------------------------------------------
+
+        body = abs(
+            row["close"] - row["open"]
+        )
+
+        body_atr = body / atr
+
+        distance_ema20 = (
+            abs(row["close"] - row["ema20"])
+            / atr
+        )
+
+        distance_ema50 = (
+            abs(row["close"] - row["ema50"])
+            / atr
+        )
+
+        distance_ema200 = (
+            abs(row["close"] - row["ema200"])
+            / atr
+        )
+
+        ema20_50 = (
+            abs(row["ema20"] - row["ema50"])
+            / atr
+        )
+
+        ema50_200 = (
+            abs(row["ema50"] - row["ema200"])
+            / atr
+        )
+
+        ema20_slope_atr = (
+            row["ema20_slope"] / atr
+        )
+
+        ema50_slope_atr = (
+            row["ema50_slope"] / atr
+        )
+
+        hour = row["datetime"].hour
+
+        # --------------------------------------------
+        # SL / TP
+        # --------------------------------------------
 
         if direction == "LONG":
 
@@ -336,6 +376,10 @@ def simulate(df, candidates):
         result = None
         exit_index = None
 
+        # --------------------------------------------
+        # BUSCAR SALIDA
+        # --------------------------------------------
+
         for j in range(
             entry_index + 1,
             len(df)
@@ -351,14 +395,12 @@ def simulate(df, candidates):
 
                     result = -1.0
                     exit_index = j
-
                     break
 
                 if high >= target:
 
                     result = 2.0
                     exit_index = j
-
                     break
 
             else:
@@ -367,14 +409,12 @@ def simulate(df, candidates):
 
                     result = -1.0
                     exit_index = j
-
                     break
 
                 if low <= target:
 
                     result = 2.0
                     exit_index = j
-
                     break
 
         if result is None:
@@ -386,16 +426,38 @@ def simulate(df, candidates):
         ).total_seconds() / 60
 
         trades.append({
-            "entry_index": entry_index,
-            "exit_index": exit_index,
+
             "direction": direction,
+
             "result_R": result,
+
             "duration_min": duration,
+
+            "body_atr": body_atr,
+
+            "distance_ema20": distance_ema20,
+
+            "distance_ema50": distance_ema50,
+
+            "distance_ema200": distance_ema200,
+
+            "ema20_50": ema20_50,
+
+            "ema50_200": ema50_200,
+
+            "ema20_slope_atr": ema20_slope_atr,
+
+            "ema50_slope_atr": ema50_slope_atr,
+
+            "hour": hour,
+
+            "atr": atr,
+
+            "entry_time": row["datetime"],
+
         })
 
-        next_available_index = (
-            exit_index + 1
-        )
+        next_available_index = exit_index + 1
 
     return trades
 
@@ -404,139 +466,93 @@ def simulate(df, candidates):
 # ESTADÍSTICAS
 # ============================================================
 
-def calculate_stats(results):
+def stats(results):
+
+    results = list(results)
 
     if not results:
-
-        return {
-            "ops": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0,
-            "R": 0,
-            "avg_R": 0,
-            "DD": 0,
-            "streak": 0,
-            "PF": 0,
-        }
+        return 0, 0, 0, 0
 
     wins = sum(
         r > 0 for r in results
     )
 
-    losses = sum(
-        r < 0 for r in results
-    )
-
-    total_R = sum(results)
+    total = sum(results)
 
     win_rate = (
         wins / len(results) * 100
     )
 
-    avg_R = (
-        total_R / len(results)
+    avg = (
+        total / len(results)
     )
 
-    equity = np.cumsum(results)
-
-    running_max = np.maximum.accumulate(
-        np.insert(equity, 0, 0)
-    )[1:]
-
-    drawdowns = (
-        equity - running_max
+    return (
+        len(results),
+        win_rate,
+        total,
+        avg
     )
 
-    max_dd = drawdowns.min()
 
-    worst_streak = 0
-    current_streak = 0
+# ============================================================
+# ANÁLISIS DE UNA VARIABLE
+# ============================================================
 
-    for r in results:
+def analyze_bins(df, column, bins, labels):
 
-        if r < 0:
+    print()
+    print("=" * 70)
+    print(f"ANÁLISIS: {column}")
+    print("=" * 70)
 
-            current_streak += 1
+    temp = df.copy()
 
-            worst_streak = max(
-                worst_streak,
-                current_streak
+    temp["grupo"] = pd.cut(
+        temp[column],
+        bins=bins,
+        labels=labels,
+        include_lowest=True
+    )
+
+    rows = []
+
+    for group in labels:
+
+        subset = temp[
+            temp["grupo"] == group
+        ]
+
+        if len(subset) == 0:
+            continue
+
+        results = subset["result_R"].tolist()
+
+        n, wr, total_R, avg_R = stats(
+            results
+        )
+
+        rows.append({
+            "rango": str(group),
+            "ops": n,
+            "win_rate": wr,
+            "R": total_R,
+            "R_medio": avg_R,
+        })
+
+    result_df = pd.DataFrame(rows)
+
+    if not result_df.empty:
+        print(
+            result_df.to_string(
+                index=False,
+                formatters={
+                    "win_rate": "{:.2f}".format,
+                    "R": "{:.2f}".format,
+                    "R_medio": "{:.3f}".format,
+                }
             )
-
-        else:
-
-            current_streak = 0
-
-    gross_profit = sum(
-        r for r in results
-        if r > 0
-    )
-
-    gross_loss = abs(sum(
-        r for r in results
-        if r < 0
-    ))
-
-    if gross_loss > 0:
-
-        profit_factor = (
-            gross_profit / gross_loss
         )
-
-    else:
-
-        profit_factor = float("inf")
-
-    return {
-        "ops": len(results),
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-        "R": total_R,
-        "avg_R": avg_R,
-        "DD": max_dd,
-        "streak": worst_streak,
-        "PF": profit_factor,
-    }
-
-
-# ============================================================
-# APLICAR COSTES
-# ============================================================
-
-def apply_costs(trades, cost_pips):
-
-    # Cada operación paga el coste completo.
-    # El coste se expresa como una fracción de R
-    # calculada respecto al riesgo de 1.5 ATR.
-
-    adjusted_results = []
-
-    for trade in trades:
-
-        # El coste en precio
-        cost_price = (
-            cost_pips * PIP_SIZE
-        )
-
-        # Para reconstruir el ATR necesitamos
-        # conservarlo. Lo añadimos posteriormente.
-        risk_price = trade["risk_price"]
-
-        cost_R = (
-            cost_price / risk_price
-        )
-
-        adjusted_R = (
-            trade["result_R"] - cost_R
-        )
-
-        adjusted_results.append(
-            adjusted_R
-        )
-
-    return adjusted_results
 
 
 # ============================================================
@@ -546,17 +562,18 @@ def apply_costs(trades, cost_pips):
 def main():
 
     print()
-    print("=" * 60)
-    print("PRUEBA DE COSTES - TODO 2025")
-    print("=" * 60)
+    print("=" * 70)
+    print("AUDITORÍA DE OPERACIONES - 2025")
+    print("=" * 70)
 
     print()
-    print("ESTRATEGIA CONGELADA:")
+    print("ESTRATEGIA CONGELADA")
+    print("---------------------")
     print("EMA 20 / 50 / 200")
-    print("SEÑAL 4/4")
-    print("INVERSIÓN ACTIVADA")
+    print("4/4")
+    print("INVERSIÓN")
     print("CONFIRMACIÓN 1 VELA")
-    print("FILTRO CUERPO 0.25 ATR")
+    print("CUERPO >= 0.25 ATR")
     print("SL 1.5 ATR")
     print("TP 3 ATR")
     print("UNA OPERACIÓN A LA VEZ")
@@ -564,7 +581,7 @@ def main():
     all_trades = []
 
     # ========================================================
-    # DESCARGAR Y SIMULAR TODO 2025
+    # RECORRER TODO 2025
     # ========================================================
 
     for index, (name, end_date) in enumerate(PERIODS):
@@ -576,10 +593,6 @@ def main():
 
         df = get_data(end_date)
 
-        print(
-            f"VELAS: {len(df)}"
-        )
-
         df = calculate_indicators(df)
 
         candidates = generate_candidates(df)
@@ -589,121 +602,14 @@ def main():
             candidates
         )
 
-        # Guardamos el riesgo real de cada operación
-        # para poder convertir costes de pips a R.
-        for trade, candidate in zip(
-            trades,
-            []
-        ):
-            pass
+        all_trades.extend(trades)
 
-        # Rehacemos la simulación conservando ATR/riesgo
-        # directamente para los costes.
-        all_period_trades = []
-
-        next_available_index = 0
-
-        for candidate in candidates:
-
-            entry_index = candidate[
-                "entry_index"
-            ]
-
-            if entry_index < next_available_index:
-                continue
-
-            direction = candidate[
-                "direction"
-            ]
-
-            atr = candidate["atr"]
-
-            entry_price = df.iloc[
-                entry_index
-            ]["close"]
-
-            if direction == "LONG":
-
-                stop = (
-                    entry_price
-                    - SL_ATR * atr
-                )
-
-                target = (
-                    entry_price
-                    + TP_ATR * atr
-                )
-
-            else:
-
-                stop = (
-                    entry_price
-                    + SL_ATR * atr
-                )
-
-                target = (
-                    entry_price
-                    - TP_ATR * atr
-                )
-
-            result = None
-            exit_index = None
-
-            for j in range(
-                entry_index + 1,
-                len(df)
-            ):
-
-                high = df.iloc[j]["high"]
-                low = df.iloc[j]["low"]
-
-                if direction == "LONG":
-
-                    if low <= stop:
-
-                        result = -1.0
-                        exit_index = j
-                        break
-
-                    if high >= target:
-
-                        result = 2.0
-                        exit_index = j
-                        break
-
-                else:
-
-                    if high >= stop:
-
-                        result = -1.0
-                        exit_index = j
-                        break
-
-                    if low <= target:
-
-                        result = 2.0
-                        exit_index = j
-                        break
-
-            if result is None:
-                continue
-
-            all_period_trades.append({
-                "result_R": result,
-                "risk_price": SL_ATR * atr,
-            })
-
-            next_available_index = (
-                exit_index + 1
-            )
-
-        all_trades.extend(
-            all_period_trades
+        print(
+            f"Candidatas: {len(candidates)}"
         )
 
         print(
-            f"OPERACIONES: "
-            f"{len(all_period_trades)}"
+            f"Operaciones: {len(trades)}"
         )
 
         if index < len(PERIODS) - 1:
@@ -715,151 +621,286 @@ def main():
             time.sleep(20)
 
     # ========================================================
-    # RESULTADOS
+    # DATAFRAME FINAL
     # ========================================================
 
+    trades_df = pd.DataFrame(
+        all_trades
+    )
+
     print()
-    print("=" * 60)
-    print("RESULTADOS BRUTOS")
-    print("=" * 60)
+    print("=" * 70)
+    print("MUESTRA COMPLETA")
+    print("=" * 70)
 
-    gross_results = [
-        t["result_R"]
-        for t in all_trades
-    ]
+    print(
+        f"OPERACIONES: {len(trades_df)}"
+    )
 
-    gross_stats = calculate_stats(
-        gross_results
+    wins = (
+        trades_df["result_R"] > 0
+    ).sum()
+
+    losses = (
+        trades_df["result_R"] < 0
+    ).sum()
+
+    print(
+        f"GANADORAS: {wins}"
     )
 
     print(
-        f"OPERACIONES: {gross_stats['ops']}"
+        f"PERDEDORAS: {losses}"
     )
 
     print(
         f"WIN RATE: "
-        f"{gross_stats['win_rate']:.2f}%"
+        f"{wins / len(trades_df) * 100:.2f}%"
     )
 
     print(
         f"R TOTAL: "
-        f"{gross_stats['R']:.2f}"
+        f"{trades_df['result_R'].sum():.2f}"
     )
 
     print(
         f"R MEDIO: "
-        f"{gross_stats['avg_R']:.3f}"
-    )
-
-    print(
-        f"DRAWDOWN: "
-        f"{gross_stats['DD']:.2f} R"
-    )
-
-    print(
-        f"PEOR RACHA: "
-        f"{gross_stats['streak']}"
-    )
-
-    print(
-        f"PROFIT FACTOR: "
-        f"{gross_stats['PF']:.3f}"
+        f"{trades_df['result_R'].mean():.3f}"
     )
 
     # ========================================================
-    # COSTES
+    # GANADORAS VS PERDEDORAS
+    # ========================================================
+
+    winners = trades_df[
+        trades_df["result_R"] > 0
+    ]
+
+    losers = trades_df[
+        trades_df["result_R"] < 0
+    ]
+
+    variables = [
+        "body_atr",
+        "distance_ema20",
+        "distance_ema50",
+        "distance_ema200",
+        "ema20_50",
+        "ema50_200",
+        "ema20_slope_atr",
+        "ema50_slope_atr",
+        "duration_min",
+        "atr",
+    ]
+
+    print()
+    print("=" * 70)
+    print("GANADORAS VS PERDEDORAS")
+    print("=" * 70)
+
+    comparison = []
+
+    for variable in variables:
+
+        comparison.append({
+            "variable": variable,
+            "ganadoras": winners[variable].mean(),
+            "perdedoras": losers[variable].mean(),
+        })
+
+    comparison_df = pd.DataFrame(
+        comparison
+    )
+
+    print(
+        comparison_df.to_string(
+            index=False,
+            formatters={
+                "ganadoras": "{:.4f}".format,
+                "perdedoras": "{:.4f}".format,
+            }
+        )
+    )
+
+    # ========================================================
+    # LONG VS SHORT
     # ========================================================
 
     print()
-    print("=" * 60)
-    print("SENSIBILIDAD A COSTES")
-    print("=" * 60)
+    print("=" * 70)
+    print("LONG VS SHORT")
+    print("=" * 70)
 
-    cost_results = []
+    direction_rows = []
 
-    for cost_pips in COSTS_PIPS:
+    for direction in ["LONG", "SHORT"]:
 
-        results = []
+        subset = trades_df[
+            trades_df["direction"] == direction
+        ]
 
-        for trade in all_trades:
+        results = subset[
+            "result_R"
+        ].tolist()
 
-            cost_price = (
-                cost_pips * PIP_SIZE
-            )
-
-            cost_R = (
-                cost_price
-                / trade["risk_price"]
-            )
-
-            adjusted_R = (
-                trade["result_R"]
-                - cost_R
-            )
-
-            results.append(
-                adjusted_R
-            )
-
-        stats = calculate_stats(
+        n, wr, total_R, avg_R = stats(
             results
         )
 
-        cost_results.append({
-            "cost_pips": cost_pips,
-            "ops": stats["ops"],
-            "win_rate": stats["win_rate"],
-            "R": stats["R"],
-            "avg_R": stats["avg_R"],
-            "DD": stats["DD"],
-            "streak": stats["streak"],
-            "PF": stats["PF"],
+        direction_rows.append({
+            "direccion": direction,
+            "ops": n,
+            "win_rate": wr,
+            "R": total_R,
+            "R_medio": avg_R,
         })
 
-        print()
-        print(
-            f"COSTE: {cost_pips:.1f} pips"
-        )
-
-        print(
-            f"R TOTAL: {stats['R']:.2f}"
-        )
-
-        print(
-            f"R MEDIO: {stats['avg_R']:.3f}"
-        )
-
-        print(
-            f"DRAWDOWN: {stats['DD']:.2f} R"
-        )
-
-        print(
-            f"PROFIT FACTOR: {stats['PF']:.3f}"
-        )
-
-    # ========================================================
-    # TABLA FINAL
-    # ========================================================
-
-    print()
-    print("=" * 60)
-    print("TABLA FINAL DE COSTES")
-    print("=" * 60)
-
-    df_results = pd.DataFrame(
-        cost_results
+    direction_df = pd.DataFrame(
+        direction_rows
     )
 
     print(
-        df_results.to_string(
-            index=False
+        direction_df.to_string(
+            index=False,
+            formatters={
+                "win_rate": "{:.2f}".format,
+                "R": "{:.2f}".format,
+                "R_medio": "{:.3f}".format,
+            }
         )
     )
 
+    # ========================================================
+    # HORA
+    # ========================================================
+
     print()
-    print("=" * 60)
-    print("FIN")
-    print("=" * 60)
+    print("=" * 70)
+    print("RESULTADOS POR HORA UTC")
+    print("=" * 70)
+
+    hour_rows = []
+
+    for hour in sorted(
+        trades_df["hour"].unique()
+    ):
+
+        subset = trades_df[
+            trades_df["hour"] == hour
+        ]
+
+        results = subset[
+            "result_R"
+        ].tolist()
+
+        n, wr, total_R, avg_R = stats(
+            results
+        )
+
+        hour_rows.append({
+            "hora": hour,
+            "ops": n,
+            "win_rate": wr,
+            "R": total_R,
+            "R_medio": avg_R,
+        })
+
+    hour_df = pd.DataFrame(
+        hour_rows
+    )
+
+    print(
+        hour_df.to_string(
+            index=False,
+            formatters={
+                "win_rate": "{:.2f}".format,
+                "R": "{:.2f}".format,
+                "R_medio": "{:.3f}".format,
+            }
+        )
+    )
+
+    # ========================================================
+    # RANGOS
+    # ========================================================
+
+    analyze_bins(
+        trades_df,
+        "body_atr",
+        [0.25, 0.50, 0.75, 1.00, 1.50, 3.00, np.inf],
+        [
+            "0.25-0.50",
+            "0.50-0.75",
+            "0.75-1.00",
+            "1.00-1.50",
+            "1.50-3.00",
+            ">3.00",
+        ]
+    )
+
+    analyze_bins(
+        trades_df,
+        "distance_ema20",
+        [0, 0.25, 0.50, 0.75, 1.00, 1.50, 2.00, np.inf],
+        [
+            "0-0.25",
+            "0.25-0.50",
+            "0.50-0.75",
+            "0.75-1.00",
+            "1.00-1.50",
+            "1.50-2.00",
+            ">2.00",
+        ]
+    )
+
+    analyze_bins(
+        trades_df,
+        "ema20_50",
+        [0, 0.10, 0.25, 0.50, 0.75, 1.00, np.inf],
+        [
+            "0-0.10",
+            "0.10-0.25",
+            "0.25-0.50",
+            "0.50-0.75",
+            "0.75-1.00",
+            ">1.00",
+        ]
+    )
+
+    analyze_bins(
+        trades_df,
+        "duration_min",
+        [0, 30, 60, 120, 180, 360, np.inf],
+        [
+            "<30",
+            "30-60",
+            "60-120",
+            "120-180",
+            "180-360",
+            ">360",
+        ]
+    )
+
+    analyze_bins(
+        trades_df,
+        "ema20_slope_atr",
+        [-np.inf, -0.10, -0.05, -0.02, 0, 0.02, 0.05, 0.10, np.inf],
+        [
+            "<-0.10",
+            "-0.10--0.05",
+            "-0.05--0.02",
+            "-0.02-0",
+            "0-0.02",
+            "0.02-0.05",
+            "0.05-0.10",
+            ">0.10",
+        ]
+    )
+
+    print()
+    print("=" * 70)
+    print("FIN DE LA AUDITORÍA")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
